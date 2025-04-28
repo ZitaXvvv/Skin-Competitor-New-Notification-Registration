@@ -145,6 +145,7 @@ For Each key, value In dic_Competitor
 							Continue
 						End If
 						/* 确定哪个是当前批件*/
+						// TODO: 
 						m = 0
 						For Each value In arr_0
 							s = value[4]
@@ -153,8 +154,8 @@ For Each key, value In dic_Competitor
 							End If
 							m = m+1
 						Next 
-
-
+                        m=1
+						Delay(3000)
 						Mouse.Move(1490, 445+40*m, false, {"iDelayAfter": 300, "iDelayBefore": 200})
 						Mouse.Click("left", "click", [], {"iDelayAfter": 300, "iDelayBefore": 300})
 
@@ -164,7 +165,6 @@ For Each key, value In dic_Competitor
 
 						arr_1 = UiElement.DataScrap({"wnd":[{"cls":"Chrome_WidgetWin_1","title":"*","app":"msedge"},{"cls":"Chrome_RenderWidgetHostHWND","title":"Chrome Legacy Window"}],"html":[{"tag":"IFRAME","id":"mobsf"},{"tag":"TABLE","parentid":"new_product"}]},{"ExtractTable":1,"Columns":[]},{"objNextLinkElement":'',"iMaxNumberOfPage":5,"iMaxNumberOfResult":-1,"iDelayBetweenMS":1000,"bContinueOnError":False})
 						
-
 						name = arr_1[0][1]
 						If iRet_1 <> 0
 							reocord_date = arr_1[11][1]

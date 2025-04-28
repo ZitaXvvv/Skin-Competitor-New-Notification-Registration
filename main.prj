@@ -41,7 +41,6 @@
             "caption": "查产品",
             "editorMode": "sourceCode",
             "breakpoints": {
-                "92": "enable",
                 "170": "enable",
                 "172": "enable",
                 "368": "enable"
