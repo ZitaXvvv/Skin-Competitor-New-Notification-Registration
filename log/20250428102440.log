@@ -1,0 +1,7 @@
+[4/28/2025 10:24:40 AM][INFO][][0] 工作路径已切换到 F:\美妆网站项目\美妆网站项目\CI\
+[4/28/2025 10:24:40 AM][INFO][流程块.task][0] 流程 流程块.task 开始运行
+[4/28/2025 10:24:58 AM][ERROR][流程块.task][70] 运行发生错误，流程中止
+错误信息如下：
+流程块.task 第70行：模块 Keyboard.KeyboardAuto.InputText 命令出错：Exception has been thrown by the target of an invocation.
+元素不可用
+[4/28/2025 10:24:58 AM][INFO][流程块.task][0] F:\美妆网站项目\美妆网站项目\CI\流程块.task 运行已结束

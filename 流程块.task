@@ -1,14 +1,17 @@
 dim dic_Competitor, lst_Competitor, hWeb, dictRet, arrayData, dTime, sRet, iRet, src, code, objExcelWorkBook, hWeb_normal, link, spdf_1, istart, arrRet, arrayexcel, reocord_date, upload_time, objRect, objPoint, bRet
 /* 所有competitors在美修大数据网站上的搜索名称*/
 dic_Competitor = {}
+/*
 dic_Competitor["PROYA"] = "珀莱雅"
 dic_Competitor["GUYU"] = "谷雨"
+*/
 dic_Competitor["OSM"] = "OSM"
+/*
 dic_Competitor["KANS"] = "韩束"
 dic_Competitor["LOREAL"] = "欧莱雅"
 dic_Competitor["ESTEE LAUDER"] = "雅诗兰黛"
 dic_Competitor["SKIN CEUTICALS"] = "修丽可"
-
+*/
 
 /* 设置时间周期*/
 timepriod = 34 /*天*/
@@ -368,6 +371,7 @@ For Each key, value In dic_Competitor
 
 Next 
 WebBrowser.Close(hWeb, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200})
+
 
 
 
