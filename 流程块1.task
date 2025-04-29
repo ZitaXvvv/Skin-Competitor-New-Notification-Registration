@@ -2,17 +2,20 @@ Dim lst_Competitor,dic_Competitor,timepriod,dTime,hWeb,arrayData,arrRet,item,iRe
 
 dic_Competitor = {}
 
-dic_Competitor["PROYA"] = "珀莱雅"
-dic_Competitor["GUYU"] = "谷雨"
+/*dic_Competitor["PROYA"] = "珀莱雅"
+dic_Competitor["GUYU"] = "谷雨" 
+*/
 dic_Competitor["OSM"] = "OSM"
+/*
 //dic_Competitor["KANS"] = "韩束"
 dic_Competitor["LOREAL"] = "欧莱雅"
 dic_Competitor["ESTEE LAUDER"] = "雅诗兰黛"
 //dic_Competitor["SKIN CEUTICALS"] = "修丽可"
+*/
 
 
 
-timepriod = 34 /*天*/
+timepriod = 40 /*天*/
 dTime = Time.Date()
 sTime = Time.Format(dTime,"yyyy-mm-dd")
 
@@ -24,7 +27,7 @@ UiElement.Wait(@ui"图像<img>","show",80000,{"bContinueOnError":false,"iDelayAf
 Mouse.Action(@ui"图像<img>3","left","click",10000,{"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [],"sSimulate": "simulate", "bMoveSmoothly": false})
 
 /* 需要手动登录*/
-Window.Show(@ui"窗口_美丽修行大数据BEBD-科学引领美丽，数据驱动未来-用户配置1-MicrosoftEdge","max")
+//Window.Show(@ui"窗口_美丽修行大数据BEBD-科学引领美丽，数据驱动未来-用户配置1-MicrosoftEdge","max")
 Delay(3000)
 
 UiElement.Wait(@ui"图像<img>","show",80000,{"bContinueOnError":false,"iDelayAfter":300,"iDelayBefore":200})
@@ -35,6 +38,7 @@ Try
     Mouse.Action(@ui"图像<img>2","left","click",10000,{"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [],"sSimulate": "simulate", "bMoveSmoothly": false})
     UiElement.Wait(@ui"输入控件<input>","show",10000,{"bContinueOnError":false,"iDelayAfter":300,"iDelayBefore":200})
 Catch error1
+    TracePrint(error1)
 End Try
 
 /* 查品牌*/
