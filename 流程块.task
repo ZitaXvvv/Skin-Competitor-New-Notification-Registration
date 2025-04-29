@@ -384,3 +384,4 @@ WebBrowser.Close(hWeb, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBe
 
 
 
+
