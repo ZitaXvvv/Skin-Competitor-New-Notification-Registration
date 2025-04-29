@@ -28,7 +28,7 @@ Mouse.Action(@ui"文本<span>_搜索", "left", "click", 10000, {"bContinueOnErro
 
 /* 需要手动登录*/
 //Window.Show(@ui"窗口_美丽修行大数据BEBD-科学引领美丽，数据驱动未来-用户配置1-MicrosoftEdge","max")
-Delay(3000)
+Delay(8000)
 
 // UiElement.Wait(@ui"图像<img>", "show", 8000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200})
 // Mouse.Action(@ui"图像<img>3", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
@@ -44,7 +44,7 @@ End Try
 /* 查品牌*/
 For Each key, value In dic_Competitor
 	Mouse.Action(@ui"块级元素<div>_查品牌", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "uia", "bMoveSmoothly": false})
-	Text.Click(@ui"块级元素<div>_查商品查品牌查成分查工厂", " 查品牌 ", "instr", 1, "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate"})
+	//Text.Click(@ui"块级元素<div>_查商品查品牌查成分查工厂", " 查品牌 ", "instr", 1, "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate"})
 	Keyboard.InputText(@ui"输入控件<input>7", value, true, 20, 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 500, "bSetForeground": true, "sSimulate": "message", "bValidate": false, "bClickBeforeInput": false})
 	Mouse.Action(@ui"按钮<button>_搜索1", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
 	Delay(3000)
