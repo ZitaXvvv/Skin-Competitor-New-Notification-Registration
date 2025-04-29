@@ -39,11 +39,11 @@
             },
             "file": "流程块.task",
             "caption": "查产品",
-            "editorMode": "visual",
+            "editorMode": "sourceCode",
             "breakpoints": {
-                "172": "enable",
-                "174": "enable",
-                "370": "enable"
+                "173": "enable",
+                "175": "enable",
+                "371": "enable"
             }
         },
         {
