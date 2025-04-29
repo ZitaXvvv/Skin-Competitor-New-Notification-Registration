@@ -315,8 +315,8 @@
             "type": "task",
             "id": "2ae9b4ea-cdd5-4cc2-9248-55b5a4c3f4e0",
             "rect": {
-                "x": 1128,
-                "y": 477,
+                "x": 772,
+                "y": 457,
                 "width": 196,
                 "height": 64
             },
@@ -326,6 +326,27 @@
             "file": "流程块4.task",
             "editorMode": "visual",
             "breakpoints": {}
+        },
+        {
+            "type": "task",
+            "id": "3c1cc430-24c9-11f0-905d-612d1e9d6fa9",
+            "rect": {
+                "x": 1100,
+                "y": 510,
+                "width": 196,
+                "height": 64
+            },
+            "caption": "查品牌主数据- ver2 加循环",
+            "next": {
+                "vertices": [],
+                "refId": ""
+            },
+            "exception": {},
+            "file": "流程块11.task",
+            "editorMode": "sourceCode",
+            "breakpoints": {
+                "50": "enable"
+            }
         }
     ],
     "variables": [
@@ -355,7 +376,7 @@
             "borders": [
                 {
                     "type": "border",
-                    "selected": 1,
+                    "selected": 0,
                     "size": 250,
                     "minSize": 250,
                     "enableAutoHide": true,
@@ -441,7 +462,6 @@
                         "type": "tabset",
                         "id": "#13230040-956b-44c7-b035-7db3a01e7059",
                         "weight": 123.17596566523605,
-                        "selected": 3,
                         "children": [
                             {
                                 "type": "tab",
@@ -584,8 +604,8 @@
     },
     "flowConfig": {
         "scrollbarPosition": {
-            "left": 923,
-            "top": 200
+            "left": 1294,
+            "top": 445
         },
         "zoom": 0.6
     }
