@@ -145,7 +145,7 @@ For Each key, value In dic_Competitor
     If iRet_N <> iRet_L
         TracePrint("警告：！！！元素数量不符合")
     End If
-    objExcelWorkBook = Excel.OpenExcel('''C:\Users\sun.y.32\OneDrive - Procter and Gamble\Desktop\RPA\美妆网站项目\CI_List_Ada.xlsx''',true,"Excel","","")
+    objExcelWorkBook = Excel.OpenExcel('''C:\Users\xie.x.3\Documents\Olay CI\CI_List_Ada.xlsx''',true,"Excel","","")
     Excel.ActiveSheet(objExcelWorkBook,"Masterdata")
     /* 统计个数*/
     green = 0
