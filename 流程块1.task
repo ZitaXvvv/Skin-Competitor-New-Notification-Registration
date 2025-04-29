@@ -1,4 +1,4 @@
-Dim lst_Competitor, dic_Competitor, timepriod, dTime, hWeb, arrayData, arrRet, item, iRet, sRet, objExcelWorkBook, objPoint
+Dim lst_Competitor, dic_Competitor, timepriod, dTime, hWeb, arrayData, arrRet, item, iRet, sRet, objExcelWorkBook, objPoint, arrSelItem
 
 dic_Competitor = {}
 
@@ -67,7 +67,18 @@ For Each key, value In dic_Competitor
 	Mouse.Action(@ui"块级元素<div>_重置", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
 
 	Mouse.Action(@ui"块级元素<div>_确认", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
-	Delay(1000)
+	For Each value In ['防晒', '护肤'] 
+        Mouse.Action(@ui"输入控件<input>13", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
+		If value = '防晒' 
+            Mouse.Action(@ui"列表项<li>_防晒1", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
+        Else 
+            
+        
+        End If
+            
+		Delay(1000)
+    Next
+		
 
 
 
