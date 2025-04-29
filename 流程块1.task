@@ -32,7 +32,7 @@ Delay(3000)
 
 // UiElement.Wait(@ui"图像<img>", "show", 8000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200})
 // Mouse.Action(@ui"图像<img>3", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
-
+/*
 Try 
 	Delay(5000)
 	Mouse.Action(@ui"图像<img>2", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
@@ -40,7 +40,7 @@ Try
 Catch error1
 	TracePrint(error1)
 End Try
-
+*/
 /* 查品牌*/
 For Each key, value In dic_Competitor
 	Mouse.Action(@ui"块级元素<div>_查品牌", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "uia", "bMoveSmoothly": false})
