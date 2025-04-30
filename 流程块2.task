@@ -15,6 +15,7 @@ TracePrint(sTime)
 
 Try
 	File.DeleteFolder('''C:\Users\xie.x.3\OneDrive - Procter and Gamble\Olay Digial UI-Bot files\CI New SKU pdf\ESTEE LAUDER''')
+	File.DeleteFolder('''C:\Users\xie.x.3\OneDrive - Procter and Gamble\Olay Digial UI-Bot files\CI New SKU pdf\OSM''')
 Catch e
      TracePrint(Cstr(e))
 End try
