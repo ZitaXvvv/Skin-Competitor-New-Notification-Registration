@@ -41,7 +41,7 @@
             "caption": "查产品",
             "editorMode": "visual",
             "breakpoints": {
-                "371": "enable"
+                "374": "enable"
             }
         },
         {
@@ -116,7 +116,7 @@
             "next": {},
             "exception": {},
             "file": "流程块4.task",
-            "editorMode": "visual",
+            "editorMode": "sourceCode",
             "breakpoints": {}
         },
         {
