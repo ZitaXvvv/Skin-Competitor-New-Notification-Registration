@@ -47,7 +47,7 @@ For Each key, value In dic_Competitor
 						Keyboard.Press("S", "press", ["Ctrl"], {"iDelayAfter": 300, "iDelayBefore": 200, "sSimulate": "simulate"})
 						Delay(1000)
 
-						Keyboard.InputText(@ui"窗口_gsxxFilePreview", src & '\\' & name & '.pdf', true, 20, 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 500, "bSetForeground": true, "sSimulate": "message", "bValidate": false, "bClickBeforeInput": false})
+						Keyboard.InputText(@ui"窗口_gsxxFilePreview", src & '\\' & name & '.pdf', true, 20, 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 500, "bSetForeground": true, "sSimulate": "simulate", "bValidate": false, "bClickBeforeInput": false})
 						Mouse.Action(@ui"窗格1", "left", "click", 10000, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200, "bSetForeground": true, "sCursorPosition": "Center", "iCursorOffsetX": 0, "iCursorOffsetY": 0, "sKeyModifiers": [], "sSimulate": "simulate", "bMoveSmoothly": false})
 						Delay(15000)
 						WebBrowser.Close(hWeb, {"bContinueOnError": false, "iDelayAfter": 300, "iDelayBefore": 200})
