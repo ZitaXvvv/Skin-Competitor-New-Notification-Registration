@@ -15,6 +15,6 @@ Do While True
         x = Cint(objRect['x']+objRect['width']/2)
         y = Cint(objRect['y']+objRect['height']/2)
         Mouse.Drag(x, y, x+offset, y, "left", [], {"iDelayAfter": 300, "iDelayBefore": 200})
-	End If bRet <> 1
+	End If
     Delay(1000)
 Loop
