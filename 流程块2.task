@@ -13,7 +13,11 @@ dTime = Time.Date()
 sTime = Time.Format(dTime, "yyyy/m/d")
 TracePrint(sTime)
 
-
+Try
+	File.DeleteFolder('''C:\Users\xie.x.3\OneDrive - Procter and Gamble\Olay Digial UI-Bot files\CI New SKU pdf\ESTEE LAUDER''')
+Catch e
+     TracePrint(Cstr(e))
+End try
 
 objExcelWorkBook = Excel.OpenExcel('''C:\Users\xie.x.3\Documents\Olay CI\CI_List_Ada.xlsx''', true, "Excel", "", "")
 
