@@ -512,11 +512,11 @@ def product_card_html(prod: dict, en_name: str) -> str:
     # Artwork/POC 按钮始终可见（放在 <details> 外部，卡片底部）
     always_btns = ""
     if prod["pdf_url"]:
-        always_btns += f'<a href="{prod["pdf_url"]}" target="_blank" class="btn btn-art">&#x1F5BC; Artwork</a>'
+        always_btns += f'<a href="{prod["pdf_url"]}" target="_blank" class="btn btn-art" title="NMPA PDF（公司内网可能需用下方下载区）">&#x1F5BC; Artwork</a>'
     if prod["label_url"]:
         always_btns += f'<a href="{prod["label_url"]}" target="_blank" class="btn btn-lbl">&#x1F3F7; Label</a>'
     if prod["poc_url"]:
-        always_btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn btn-poc">&#x1F9EA; POC</a>'
+        always_btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn btn-poc" title="NMPA 产品详情页（需能访问 NMPA 外网）">&#x1F9EA; POC</a>'
     always_btn_block = f'<div class="btn-row" style="padding:4px 8px 6px">{always_btns}</div>' if always_btns else ""
     return f"""<div class="{card_cls}" {drag_attrs}>
   <details>
@@ -988,7 +988,7 @@ def _render_pdf_download_section(records: list[dict]):
     if not local_pdfs and not any(r.get("pdf_url") or r.get("poc_url") for r in records):
         return
 
-    with st.expander(f"⬇ PDF & Links  ({len(local_pdfs)} 个本地 PDF 可下载)"):
+    with st.expander(f"⬇️ PDF 本地下载（{len(local_pdfs)} 个文件）— 公司内网内使用此处下载", expanded=True):
         # 按品牌分组显示
         by_brand: dict[str, list] = {}
         for r in records:
@@ -1177,7 +1177,7 @@ def main():
     FRAME_HEIGHT = 820
     st.iframe(full_html, height=FRAME_HEIGHT)
 
-    # ── PDF 本地下载区 ──
+    # ── PDF 本地下载区（公司网络内 NMPA 外部链接可能无法打开，优先用此）──
     _render_pdf_download_section(filtered)
 
     # ── 数据下载 ──
