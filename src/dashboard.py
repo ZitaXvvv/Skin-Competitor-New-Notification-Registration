@@ -149,14 +149,49 @@ def translate_batch(names: list[str], cache: dict, timeout_sec: int = 8) -> dict
 
 
 # ─────────────────────────────────────────────
-# 数据加载
+# 数据加载（读取当前 + 所有历史月份 Excel，跨文件去重）
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=1800, show_spinner="⏳ 读取数据…")
-def load_data() -> list[dict]:
-    if not Path(EXCEL_PATH).exists():
-        return []
-    wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True)
-    records = []
+import re as _re_global
+_REG_PAT_GLOBAL = _re_global.compile(
+    r"(妆网备字|国妆备字|国妆特字|国妆特进字|国妆备进字|卫妆特字)"
+)
+
+
+def _excel_files_to_load() -> list[Path]:
+    """返回所有 CI_List_Ada*.xlsx 路径，当前文件排最后（优先级最高）"""
+    base_dir = Path(EXCEL_PATH).parent
+    historical = sorted(base_dir.glob("CI_List_Ada *.xlsx"))
+    current = Path(EXCEL_PATH)
+    # 排除已在 historical 里的当前文件（名字不同）
+    result = [f for f in historical if f != current]
+    if current.exists():
+        result.append(current)
+    return result
+
+
+def _parse_notif_date(notif_raw, upload_raw):
+    from datetime import date as _date, datetime as _datetime
+    for val in [notif_raw, upload_raw]:
+        if val is None:
+            continue
+        if hasattr(val, "date") and callable(val.date):
+            return val.date()
+        if isinstance(val, _date):
+            return val
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return _datetime.strptime(str(val).strip(), fmt).date()
+            except ValueError:
+                pass
+    return None
+
+
+def _load_one_excel(path: Path, seen_regs: set, records: list):
+    """从单个 Excel 读取所有品牌数据，去重后追加到 records"""
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True)
+    except Exception:
+        return
     for brand_en, brand_cn in BRANDS.items():
         if brand_en not in wb.sheetnames:
             continue
@@ -164,70 +199,80 @@ def load_data() -> list[dict]:
         for row in ws.iter_rows(min_row=2, values_only=True):
             if not row or len(row) < 5:
                 continue
+
             def g(col):
                 return row[col - 1] if len(row) >= col else None
-            name_raw  = g(COL_NAME)
-            effect    = g(COL_EFFECT)
-            notif_raw = g(COL_DATE)
-            upload_raw= g(COL_UPLOAD_DATE)
-            ingr      = g(COL_INGREDIENTS)
-            pdf       = g(COL_PDF_URL)
-            label     = g(COL_LABEL_URL)
-            poc       = g(COL_POC_URL)
+
+            name_raw   = g(COL_NAME)
+            effect_raw = g(COL_EFFECT)
+            notif_raw  = g(COL_DATE)
+            upload_raw = g(COL_UPLOAD_DATE)
+            ingr_raw   = g(COL_INGREDIENTS)
+            pdf_raw    = g(COL_PDF_URL)
+            label_raw  = g(COL_LABEL_URL)
+            poc_raw    = g(COL_POC_URL)
 
             if not name_raw:
                 continue
 
-            notif_date = None
-            for val in [notif_raw, upload_raw]:
-                if val is None:
-                    continue
-                if hasattr(val, "date"):
-                    notif_date = val.date()
-                    break
-                for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
-                    try:
-                        notif_date = datetime.strptime(str(val).strip(), fmt).date()
-                        break
-                    except ValueError:
-                        pass
-                if notif_date:
-                    break
+            notif_date = _parse_notif_date(notif_raw, upload_raw)
             if not notif_date:
                 continue
 
-            # Classify reg type from any cell
-            import re
-            reg_type = ""
+            # 找备案号（任意列）
+            reg_str = ""
             for cell in row:
-                s = str(cell or "")
-                if re.search(r"国妆特字|国妆特进字|卫妆特字", s):
-                    reg_type = "特殊注册"
+                s = str(cell or "").strip()
+                if s and _REG_PAT_GLOBAL.search(s):
+                    reg_str = s
                     break
-                if re.search(r"妆网备字|国妆备字|国妆备进字", s):
-                    reg_type = "普通备案"
-                    break
+
+            # 跨文件去重（优先保留当前文件的数据，historical 已先加入）
+            if reg_str and reg_str in seen_regs:
+                continue
+            if reg_str:
+                seen_regs.add(reg_str)
+
+            reg_type = ""
+            if _re_global.search(r"国妆特字|国妆特进字|卫妆特字", reg_str):
+                reg_type = "特殊注册"
+            elif _re_global.search(r"妆网备字|国妆备字|国妆备进字", reg_str):
+                reg_type = "普通备案"
 
             def clean(v):
                 s = str(v or "").strip()
                 return s if s not in ("None", "NA", "") else ""
 
             records.append({
-                "brand_en":   brand_en,
-                "brand_cn":   brand_cn,
-                "name":       str(name_raw).strip(),
-                "effect":     clean(effect),
-                "ingredients":clean(ingr),
-                "notif_date": notif_date,
-                "year":       notif_date.year,
-                "month":      notif_date.month,
-                "year_month": notif_date.strftime("%Y-%m"),
-                "reg_type":   reg_type,
-                "pdf_url":    clean(pdf),
-                "label_url":  clean(label),
-                "poc_url":    clean(poc),
+                "brand_en":    brand_en,
+                "brand_cn":    brand_cn,
+                "name":        str(name_raw).strip(),
+                "effect":      clean(effect_raw),
+                "ingredients": clean(ingr_raw),
+                "notif_date":  notif_date,
+                "year":        notif_date.year,
+                "month":       notif_date.month,
+                "year_month":  notif_date.strftime("%Y-%m"),
+                "reg_num":     reg_str,
+                "reg_type":    reg_type,
+                "pdf_url":     clean(pdf_raw),
+                "label_url":   clean(label_raw),
+                "poc_url":     clean(poc_raw),
+                "source_file": path.name,
             })
     wb.close()
+
+
+@st.cache_data(ttl=1800, show_spinner="⏳ 读取数据…")
+def load_data() -> list[dict]:
+    files = _excel_files_to_load()
+    if not files:
+        return []
+    records: list[dict] = []
+    seen_regs: set[str] = set()
+    for f in files:
+        _load_one_excel(f, seen_regs, records)
+    return records
     return records
 
 
