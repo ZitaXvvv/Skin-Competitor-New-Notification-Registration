@@ -726,13 +726,18 @@ def _build_products_map(filtered: list[dict]) -> str:
         if not pid:
             continue
         zh_list = _parse_ingr(r.get("ingredients", ""))
-        en_list = [(_translate_ingr(x) or x) for x in zh_list]
+        en_list = [(_translate_ingr(x) or "") for x in zh_list]
+        # 每条成分：用英文名做匹配键，同时携带中文原名用于双语显示
+        ingr_items = [
+            {"key": (en or zh).lower(), "label": (f"{zh} / {en}" if en and en != zh else zh)}
+            for zh, en in zip(zh_list, en_list)
+        ]
         products[pid] = {
             "name": r["name"],
             "brand": r["brand_en"],
             "reg": r["reg_num"],
             "date": str(r["notif_date"]),
-            "ingr": en_list,
+            "ingr": ingr_items,
         }
     return json.dumps(products, ensure_ascii=False)
 
@@ -825,23 +830,22 @@ def _build_compare_widget_html(products_json: str) -> str:
     }});
   }}
   function cmpIngrDiff(listA, listB) {{
+    // listA/listB 现在是 {{key, label}} 对象数组
     var posA = {{}}, posB = {{}};
-    listA.forEach(function(x, i) {{ var k = x.toLowerCase(); if (!(k in posA)) posA[k] = i; }});
-    listB.forEach(function(x, i) {{ var k = x.toLowerCase(); if (!(k in posB)) posB[k] = i; }});
+    listA.forEach(function(x, i) {{ if (!(x.key in posA)) posA[x.key] = i; }});
+    listB.forEach(function(x, i) {{ if (!(x.key in posB)) posB[x.key] = i; }});
     var rows = [];
-    listA.forEach(function(name, i) {{
-      var key = name.toLowerCase();
-      if (key in posB) {{
-        var j = posB[key], shift = i - j;
-        rows.push({{name: name, status: Math.abs(shift) >= 5 ? 'moved' : 'same',
+    listA.forEach(function(item, i) {{
+      if (item.key in posB) {{
+        var j = posB[item.key], shift = i - j;
+        rows.push({{label: item.label, status: Math.abs(shift) >= 5 ? 'moved' : 'same',
                     posA: i + 1, posB: j + 1, shift: shift}});
       }} else {{
-        rows.push({{name: name, status: 'removed', posA: i + 1, posB: null, shift: null}});
+        rows.push({{label: item.label, status: 'removed', posA: i + 1, posB: null, shift: null}});
       }}
     }});
-    listB.forEach(function(name, j) {{
-      var key = name.toLowerCase();
-      if (!(key in posA)) rows.push({{name: name, status: 'added', posA: null, posB: j + 1, shift: null}});
+    listB.forEach(function(item, j) {{
+      if (!(item.key in posA)) rows.push({{label: item.label, status: 'added', posA: null, posB: j + 1, shift: null}});
     }});
     rows.sort(function(a, b) {{
       var sa = a.posB !== null ? a.posB : (a.posA || 999) + 5000;
@@ -882,7 +886,7 @@ def _build_compare_widget_html(products_json: str) -> str:
       }} else {{ cls = 'same'; arrow = '='; pa = d.posA; pb = d.posB; }}
       rowsHtml += '<div class="cmp-row">' +
         '<div class="cmp-cell ' + cls + '" style="text-align:center">' + arrow + '</div>' +
-        '<div class="cmp-cell ' + cls + '">' + d.name + '</div>' +
+        '<div class="cmp-cell ' + cls + '">' + d.label + '</div>' +
         '<div class="cmp-cell ' + cls + '" style="text-align:center">' + pa + '</div>' +
         '<div class="cmp-cell ' + cls + '" style="text-align:center">' + pb + '</div>' +
         '</div>';
