@@ -26,6 +26,7 @@ from config import (
     COL_POC_URL,
     COL_REG_NUM,
     COL_UPLOAD_DATE,
+    DOWNLOAD_BASE,
     EXCEL_PATH,
 )
 
@@ -910,6 +911,92 @@ def _build_compare_widget_html(products_json: str) -> str:
 """
 
 
+def _render_pdf_download_section(records: list[dict]):
+    """
+    扫描本地已下载的 PDF 文件（DOWNLOAD_BASE/{brand}/{name}.pdf 或 特化--{name}.pdf），
+    提供 Streamlit 原生 download_button 一键下载。
+    也列出 Artwork (H列) 和 mini-POC (J列) 链接供直接访问。
+    """
+    base = Path(DOWNLOAD_BASE)
+    if not base.exists():
+        return
+
+    # 收集本地已存在的 PDF（按品牌→产品名建立索引）
+    local_pdfs: dict[str, Path] = {}  # key = "{brand_en}:{prod_name}" → Path
+    for brand_en in BRANDS:
+        folder = base / brand_en
+        if not folder.exists():
+            continue
+        for pdf in folder.glob("*.pdf"):
+            # 兼容 "特化--{name}.pdf" 和 "{name}.pdf"
+            stem = pdf.stem
+            if stem.startswith("特化--"):
+                stem = stem[3:]
+            local_pdfs[f"{brand_en}:{stem}"] = pdf
+
+    if not local_pdfs and not any(r.get("pdf_url") or r.get("poc_url") for r in records):
+        return
+
+    with st.expander(f"⬇ PDF & Links  ({len(local_pdfs)} 个本地 PDF 可下载)"):
+        # 按品牌分组显示
+        by_brand: dict[str, list] = {}
+        for r in records:
+            by_brand.setdefault(r["brand_en"], []).append(r)
+
+        for brand_en, prods in by_brand.items():
+            # 只显示有链接或有本地文件的品牌
+            brand_entries = []
+            for p in prods:
+                key_exact  = f"{brand_en}:{p['name']}"
+                key_prefix = next(
+                    (k for k in local_pdfs if k.startswith(f"{brand_en}:") and p["name"][:15] in k),
+                    None
+                )
+                local_path = local_pdfs.get(key_exact) or (local_pdfs.get(key_prefix) if key_prefix else None)
+                has_link = p.get("pdf_url") or p.get("poc_url") or local_path
+                if has_link:
+                    brand_entries.append((p, local_path))
+
+            if not brand_entries:
+                continue
+
+            st.markdown(f"**{brand_en} / {BRANDS[brand_en]}** ({len(brand_entries)}件)")
+            for p, local_path in brand_entries:
+                cols = st.columns([4, 1, 1, 1])
+                cols[0].markdown(
+                    f"<span style='font-size:12px'>{p['name'][:40]}</span>",
+                    unsafe_allow_html=True
+                )
+                # 本地 PDF 下载
+                if local_path:
+                    pdf_bytes = local_path.read_bytes()
+                    cols[1].download_button(
+                        "⬇ PDF",
+                        data=pdf_bytes,
+                        file_name=local_path.name,
+                        mime="application/pdf",
+                        key=f"dl_{brand_en}_{p['reg_num']}",
+                        use_container_width=True
+                    )
+                else:
+                    cols[1].markdown("<span style='color:#aaa;font-size:11px'>无本地文件</span>",
+                                     unsafe_allow_html=True)
+                # Artwork 链接（NMPA PDF viewer）
+                if p.get("pdf_url"):
+                    cols[2].markdown(
+                        f"<a href='{p['pdf_url']}' target='_blank' "
+                        f"style='font-size:11px;color:#1565c0'>🖼 Artwork</a>",
+                        unsafe_allow_html=True
+                    )
+                # mini-POC 链接
+                if p.get("poc_url"):
+                    cols[3].markdown(
+                        f"<a href='{p['poc_url']}' target='_blank' "
+                        f"style='font-size:11px;color:#2e7d32'>🧪 POC</a>",
+                        unsafe_allow_html=True
+                    )
+
+
 # ─────────────────────────────────────────────
 # 主界面
 # ─────────────────────────────────────────────
@@ -1030,6 +1117,9 @@ def main():
     # 悬浮层在"滚动年份/品牌"时始终保持可见。
     FRAME_HEIGHT = 820
     st.iframe(full_html, height=FRAME_HEIGHT)
+
+    # ── PDF 本地下载区 ──
+    _render_pdf_download_section(filtered)
 
     # ── 数据下载 ──
     with st.expander("📊 原始数据 / 下载 CSV"):
