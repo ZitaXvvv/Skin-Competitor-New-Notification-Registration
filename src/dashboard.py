@@ -988,7 +988,7 @@ def _render_pdf_download_section(records: list[dict]):
     if not local_pdfs and not any(r.get("pdf_url") or r.get("poc_url") for r in records):
         return
 
-    with st.expander(f"⬇️ PDF 本地下载（{len(local_pdfs)} 个文件）— 公司内网内使用此处下载", expanded=True):
+    with st.expander(f"⬇️ PDF 本地下载（{len(local_pdfs)} 个文件）— 公司内网内使用此处下载", expanded=False):
         # 按品牌分组显示
         by_brand: dict[str, list] = {}
         for r in records:
