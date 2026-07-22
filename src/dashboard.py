@@ -370,29 +370,49 @@ GLOBAL_CSS = """
     border: 1px solid #f0f2f5;
     padding: 6px;
     vertical-align: top;
-    min-width: 130px;
-    max-width: 170px;
+    min-width: 200px;
     background: white;
   }
   .cal-cell:hover { background: #fafbff; }
 
-  /* 产品卡片 */
+  /* 每格3列网格 */
+  .cell-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+  }
+
+  /* 产品卡片（默认折叠，点击展开） */
   .prod-card {
     background: white;
     border: 1px solid #e8ecf1;
-    border-left: 3px solid #1565c0;
-    border-radius: 8px;
-    padding: 8px 10px;
-    margin-bottom: 6px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.05);
-    transition: box-shadow .15s;
+    border-top: 3px solid #1565c0;
+    border-radius: 7px;
+    box-sizing: border-box;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
   }
-  .prod-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.1); }
-  .prod-card.special { border-left-color: #c62828; }
+  .prod-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.10); }
+  .prod-card.special { border-top-color: #c62828; }
 
-  .prod-name { font-weight: 600; color: #1a2b4a; font-size: 12px;
-               line-height: 1.35; margin-bottom: 2px; }
-  .prod-en   { color: #5f7089; font-size: 10px; margin-bottom: 4px;
+  /* <details> 折叠 */
+  .prod-card details { margin: 0; }
+  .prod-card summary {
+    cursor: pointer; list-style: none;
+    padding: 7px 8px;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .prod-card summary::-webkit-details-marker { display: none; }
+  .prod-card summary:hover { background: #f5f8ff; }
+  .sum-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; }
+  .expand-hint { color: #aab4be; font-size: 9px; flex-shrink: 0; }
+  details[open] .expand-hint::after { content: '▲'; }
+  details:not([open]) .expand-hint::after { content: '▼'; }
+  .prod-body { padding: 0 8px 8px; border-top: 1px solid #f0f2f5; }
+
+  .prod-name { font-weight: 600; color: #1a2b4a; font-size: 11px;
+               line-height: 1.3; flex: 1; }
+  .prod-en   { color: #5f7089; font-size: 10px; margin: 5px 0 3px;
                font-style: italic; }
   .prod-eff  { color: #637382; font-size: 10px; margin-bottom: 5px;
                display: -webkit-box; -webkit-line-clamp: 2;
@@ -442,10 +462,11 @@ GLOBAL_CSS = """
 
 def product_card_html(prod: dict, en_name: str) -> str:
     is_special = prod["reg_type"] == "特殊注册"
-    badge = (f'<span class="badge badge-s">特殊注册</span>'
-             if is_special
-             else f'<span class="badge badge-n">普通备案</span>')
-    eff = (prod["effect"][:55] + "…") if len(prod["effect"]) > 55 else prod["effect"]
+    badge = (f'<span class="badge badge-s">特殊</span>'
+             if is_special else f'<span class="badge badge-n">备案</span>')
+    eff   = (prod["effect"][:60] + "…") if len(prod["effect"]) > 60 else prod["effect"]
+    ingr  = prod.get("ingredients", "") or ""
+    ingr_s = (ingr[:120] + "…") if len(ingr) > 120 else ingr
 
     btns = ""
     if prod["pdf_url"]:
@@ -455,17 +476,26 @@ def product_card_html(prod: dict, en_name: str) -> str:
     if prod["poc_url"]:
         btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn btn-poc">🧪 POC</a>'
 
-    en_block = f'<div class="prod-en">{en_name[:55]}</div>' if en_name else ""
-    eff_block = f'<div class="prod-eff">{eff}</div>' if eff else ""
-    btn_block = f'<div class="btn-row">{btns}</div>' if btns else ""
+    en_block   = f'<div class="prod-en">{en_name[:50]}</div>' if en_name else ""
+    eff_block  = f'<div class="prod-eff">{eff}</div>'  if eff else ""
+    ingr_block = f'<div class="prod-ingr">{ingr_s}</div>' if ingr_s else ""
+    btn_block  = f'<div class="btn-row">{btns}</div>' if btns else ""
 
     card_cls = "prod-card special" if is_special else "prod-card"
+    name_disp = prod["name"][:32]
     return f"""<div class="{card_cls}">
-  <div class="prod-name">{prod["name"][:38]}</div>
-  {en_block}
-  {eff_block}
-  <div class="prod-meta">{badge}</div>
-  {btn_block}
+  <details>
+    <summary>
+      <div class="sum-row">
+        <span class="prod-name">{name_disp}</span>
+        <span class="expand-hint"></span>
+      </div>
+      {badge}
+    </summary>
+    <div class="prod-body">
+      {en_block}{eff_block}{ingr_block}{btn_block}
+    </div>
+  </details>
 </div>"""
 
 
@@ -614,407 +644,6 @@ def main():
                            csv,
                            file_name=f"ci_newsku_{selected_year}.csv",
                            mime="text/csv")
-
-
-if __name__ == "__main__":
-    main()
-
-
-sys.path.insert(0, str(Path(__file__).parent))
-from config import (
-    BRANDS,
-    COL_DATE,
-    COL_EFFECT,
-    COL_INGREDIENTS,
-    COL_LABEL_URL,
-    COL_NAME,
-    COL_PDF_URL,
-    COL_POC_URL,
-    COL_REG_NUM,
-    COL_UPLOAD_DATE,
-    EXCEL_PATH,
-)
-
-# ─────────────────────────────────────────────
-# 页面配置
-# ─────────────────────────────────────────────
-st.set_page_config(
-    page_title="CI New SKU Dashboard",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-TRANSLATION_CACHE = Path(__file__).parent / "translations_cache.json"
-
-
-# ─────────────────────────────────────────────
-# 翻译缓存
-# ─────────────────────────────────────────────
-@st.cache_resource
-def load_translation_cache() -> dict:
-    if TRANSLATION_CACHE.exists():
-        with open(TRANSLATION_CACHE, encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def save_translation_cache(cache: dict):
-    with open(TRANSLATION_CACHE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
-
-
-def translate_name(zh_name: str, cache: dict) -> str:
-    if not zh_name or not zh_name.strip():
-        return ""
-    key = zh_name.strip()
-    if key in cache:
-        return cache[key]
-    try:
-        from deep_translator import GoogleTranslator
-        en = GoogleTranslator(source="zh-CN", target="en").translate(key)
-        cache[key] = en or ""
-        save_translation_cache(cache)
-        return en or ""
-    except Exception:
-        return ""
-
-
-# ─────────────────────────────────────────────
-# 数据加载
-# ─────────────────────────────────────────────
-@st.cache_data(ttl=1800, show_spinner="读取 Excel 数据…")
-def load_data() -> list[dict]:
-    if not Path(EXCEL_PATH).exists():
-        return []
-
-    wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True)
-    records = []
-
-    for brand_en, brand_cn in BRANDS.items():
-        if brand_en not in wb.sheetnames:
-            continue
-        ws = wb[brand_en]
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row or len(row) < 5:
-                continue
-            name_raw   = row[COL_NAME       - 1] if len(row) >= COL_NAME       else None
-            effect_raw = row[COL_EFFECT     - 1] if len(row) >= COL_EFFECT     else None
-            notif_raw  = row[COL_DATE       - 1] if len(row) >= COL_DATE       else None
-            upload_raw = row[COL_UPLOAD_DATE- 1] if len(row) >= COL_UPLOAD_DATE else None
-            reg_raw    = row[COL_REG_NUM    - 1] if len(row) >= COL_REG_NUM    else None
-            ingr_raw   = row[COL_INGREDIENTS- 1] if len(row) >= COL_INGREDIENTS else None
-            pdf_raw    = row[COL_PDF_URL    - 1] if len(row) >= COL_PDF_URL    else None
-            label_raw  = row[COL_LABEL_URL  - 1] if len(row) >= COL_LABEL_URL  else None
-            poc_raw    = row[COL_POC_URL    - 1] if len(row) >= COL_POC_URL    else None
-
-            if not name_raw:
-                continue
-
-            # 日期：优先用备案时间(D)，再用上传时间(A)
-            notif_date = None
-            for val in [notif_raw, upload_raw]:
-                if val is None:
-                    continue
-                if hasattr(val, "date"):
-                    notif_date = val.date()
-                    break
-                for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
-                    try:
-                        notif_date = datetime.strptime(str(val).strip(), fmt).date()
-                        break
-                    except ValueError:
-                        pass
-                if notif_date:
-                    break
-
-            if not notif_date:
-                continue
-
-            reg_str  = str(reg_raw or "")
-            reg_type = "特殊注册" if "特" in reg_str else ("普通备案" if "备" in reg_str else "")
-
-            def clean(v):
-                s = str(v or "").strip()
-                return s if s not in ("None", "NA", "") else ""
-
-            records.append({
-                "brand_en":   brand_en,
-                "brand_cn":   brand_cn,
-                "name":       str(name_raw).strip(),
-                "effect":     clean(effect_raw),
-                "ingredients":clean(ingr_raw),
-                "notif_date": notif_date,
-                "year":       notif_date.year,
-                "month":      notif_date.month,
-                "year_month": notif_date.strftime("%Y-%m"),
-                "reg_num":    reg_str,
-                "reg_type":   reg_type,
-                "pdf_url":    clean(pdf_raw),
-                "label_url":  clean(label_raw),
-                "poc_url":    clean(poc_raw),
-            })
-
-    wb.close()
-    return records
-
-
-# ─────────────────────────────────────────────
-# HTML 产品卡片
-# ─────────────────────────────────────────────
-CSS = """
-<style>
-.cal-wrap   { overflow-x: auto; }
-.cal-table  { border-collapse: collapse; width: 100%; font-size: 12px; }
-.cal-th     { background:#1F5C99; color:white; text-align:center;
-              padding:6px 4px; white-space:nowrap; min-width:100px; }
-.cal-brand  { background:#f5f5f5; padding:8px 6px; font-weight:bold;
-              white-space:nowrap; min-width:80px; vertical-align:top;
-              border:1px solid #ddd; }
-.cal-cell   { border:1px solid #e8e8e8; padding:4px; vertical-align:top;
-              min-width:120px; max-width:200px; }
-.prod-card  { background:#fff; border:1px solid #e0e0e0; border-radius:6px;
-              padding:7px; margin-bottom:5px; }
-.prod-name  { font-weight:600; color:#1a1a1a; font-size:12px;
-              line-height:1.3; margin-bottom:2px; }
-.prod-en    { color:#777; font-style:italic; font-size:10px; margin-bottom:3px; }
-.prod-eff   { color:#444; font-size:10px; margin-bottom:3px;
-              display:-webkit-box; -webkit-line-clamp:2;
-              -webkit-box-orient:vertical; overflow:hidden; }
-.badge-n    { background:#d4edda; color:#155724; font-size:9px;
-              padding:1px 5px; border-radius:10px; }
-.badge-s    { background:#f8d7da; color:#721c24; font-size:9px;
-              padding:1px 5px; border-radius:10px; }
-.reg-num    { color:#888; font-size:9px; margin-left:4px; }
-.btn-row    { margin-top:4px; display:flex; gap:4px; flex-wrap:wrap; }
-.btn-art    { background:#0d6efd; color:white; border:none; border-radius:4px;
-              padding:3px 8px; font-size:10px; cursor:pointer;
-              text-decoration:none; display:inline-block; }
-.btn-lbl    { background:#6f42c1; color:white; border:none; border-radius:4px;
-              padding:3px 8px; font-size:10px; cursor:pointer;
-              text-decoration:none; display:inline-block; }
-.btn-poc    { background:#198754; color:white; border:none; border-radius:4px;
-              padding:3px 8px; font-size:10px; cursor:pointer;
-              text-decoration:none; display:inline-block; }
-.month-badge{ background:#1F5C99; color:white; border-radius:10px;
-              padding:1px 6px; font-size:10px; margin-left:4px; }
-</style>
-"""
-
-
-def product_card_html(prod: dict, en_name: str) -> str:
-    badge = (f'<span class="badge-s">特殊注册</span>'
-             if prod["reg_type"] == "特殊注册"
-             else f'<span class="badge-n">普通备案</span>')
-
-    reg_short = prod["reg_num"][:22] if prod["reg_num"] else ""
-    eff_short = (prod["effect"][:60] + "…") if len(prod["effect"]) > 60 else prod["effect"]
-
-    btns = ""
-    if prod["pdf_url"]:
-        btns += f'<a href="{prod["pdf_url"]}" target="_blank" class="btn-art">🖼 Artwork</a>'
-    if prod["label_url"]:
-        btns += f'<a href="{prod["label_url"]}" target="_blank" class="btn-lbl">🏷 Label</a>'
-    if prod["poc_url"]:
-        btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn-poc">🧪 POC</a>'
-
-    en_block = f'<div class="prod-en">{en_name[:50]}</div>' if en_name else ""
-    eff_block = f'<div class="prod-eff">{eff_short}</div>' if eff_short else ""
-
-    return f"""
-<div class="prod-card">
-  <div class="prod-name">{prod["name"][:35]}</div>
-  {en_block}
-  {eff_block}
-  <div>{badge}<span class="reg-num">{reg_short}</span></div>
-  <div class="btn-row">{btns}</div>
-</div>"""
-
-
-def build_calendar_html(
-    records: list[dict],
-    selected_brands: list[str],
-    months: list[tuple],          # [(year_month, label), ...]
-    translation_cache: dict,
-) -> str:
-    # group: brand → year_month → list[prod]
-    grouped: dict[str, dict[str, list]] = {}
-    for r in records:
-        if r["brand_en"] not in selected_brands:
-            continue
-        grouped.setdefault(r["brand_en"], {}).setdefault(r["year_month"], []).append(r)
-
-    if not grouped:
-        return "<p style='color:#888'>当前筛选条件下无数据</p>"
-
-    html = CSS + '<div class="cal-wrap"><table class="cal-table"><tr>'
-    html += '<th class="cal-th" style="min-width:80px">品牌</th>'
-
-    for ym, label in months:
-        total = sum(len(grouped.get(b, {}).get(ym, [])) for b in selected_brands)
-        badge = f'<span class="month-badge">{total}</span>' if total else ""
-        html += f'<th class="cal-th">{label}{badge}</th>'
-    html += "</tr>"
-
-    for brand_en in selected_brands:
-        brand_data = grouped.get(brand_en)
-        if not brand_data:
-            continue
-        brand_cn = BRANDS[brand_en]
-        html += f'<tr><td class="cal-brand">{brand_en}<br><small style="color:#666">{brand_cn}</small></td>'
-
-        for ym, _ in months:
-            prods = brand_data.get(ym, [])
-            html += '<td class="cal-cell">'
-            for p in prods:
-                en = translate_name(p["name"], translation_cache)
-                html += product_card_html(p, en)
-            html += "</td>"
-
-        html += "</tr>"
-
-    html += "</table></div>"
-    return html
-
-
-# ─────────────────────────────────────────────
-# 成分 / 功效 详情弹窗
-# ─────────────────────────────────────────────
-def show_product_detail(records: list[dict], translation_cache: dict):
-    """侧边栏：搜索产品查看完整成分和功效"""
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🔍 产品详情查询")
-
-    all_names = sorted({r["name"] for r in records if r["name"]})
-    chosen = st.sidebar.selectbox("选择产品", ["— 请选择 —"] + all_names)
-
-    if chosen == "— 请选择 —":
-        return
-
-    matches = [r for r in records if r["name"] == chosen]
-    if not matches:
-        return
-
-    prod = matches[0]
-    en_name = translate_name(prod["name"], translation_cache)
-
-    st.sidebar.markdown(f"### {prod['name']}")
-    if en_name:
-        st.sidebar.markdown(f"*{en_name}*")
-    st.sidebar.markdown(f"**品牌**: {prod['brand_en']} / {prod['brand_cn']}")
-    st.sidebar.markdown(f"**备案号**: `{prod['reg_num']}`")
-    st.sidebar.markdown(f"**类型**: {prod['reg_type']}")
-    st.sidebar.markdown(f"**备案日期**: {prod['notif_date']}")
-
-    if prod["effect"]:
-        st.sidebar.markdown("**功效宣称**:")
-        st.sidebar.markdown(f"> {prod['effect']}")
-
-    if prod["ingredients"]:
-        with st.sidebar.expander("📋 完整成分列表"):
-            st.write(prod["ingredients"])
-
-    if prod["pdf_url"]:
-        st.sidebar.link_button("🖼 打开 Artwork PDF", prod["pdf_url"], use_container_width=True)
-    if prod["label_url"]:
-        st.sidebar.link_button("🏷 产品标签链接", prod["label_url"], use_container_width=True)
-    if prod["poc_url"]:
-        st.sidebar.link_button("🧪 mini POC 链接", prod["poc_url"], use_container_width=True)
-
-
-# ─────────────────────────────────────────────
-# 主界面
-# ─────────────────────────────────────────────
-def main():
-    st.title("🔬 CI New SKU Dashboard")
-    st.caption("竞品注册/备案月历 · 成分 · 功效 · Artwork PDF")
-
-    records = load_data()
-    translation_cache = load_translation_cache()
-
-    if not records:
-        st.error(
-            "⚠️ 未读到数据。请先运行：\n\n"
-            "```\npython src/main.py --days 730\n```"
-        )
-        st.stop()
-
-    # ── 筛选 ──
-    all_years = sorted({r["year"] for r in records}, reverse=True)
-    all_brand_keys = list(BRANDS.keys())
-
-    col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1.5])
-    with col1:
-        selected_brands = st.multiselect(
-            "品牌", all_brand_keys, default=all_brand_keys,
-            placeholder="选择品牌"
-        )
-    with col2:
-        selected_year = st.selectbox("年份", all_years)
-    with col3:
-        reg_type_filter = st.selectbox("类型", ["全部", "普通备案", "特殊注册"])
-    with col4:
-        show_en = st.toggle("显示英文名（需网络）", value=False)
-
-    if not show_en:
-        # Clear cache to avoid translation calls
-        pass
-
-    # Filter
-    filtered = [
-        r for r in records
-        if r["brand_en"] in selected_brands
-        and r["year"] == selected_year
-        and (reg_type_filter == "全部" or r["reg_type"] == reg_type_filter)
-    ]
-
-    # 统计
-    total_count = len(filtered)
-    normal_count  = sum(1 for r in filtered if r["reg_type"] == "普通备案")
-    special_count = sum(1 for r in filtered if r["reg_type"] == "特殊注册")
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("总产品数", total_count)
-    m2.metric("🟢 普通备案", normal_count)
-    m3.metric("🔴 特殊注册", special_count)
-
-    st.markdown("---")
-
-    # ── 月份生成 ──
-    month_labels = [
-        "1月", "2月", "3月", "4月", "5月", "6月",
-        "7月", "8月", "9月", "10月", "11月", "12月",
-    ]
-    months = [
-        (f"{selected_year}-{m:02d}", month_labels[m-1])
-        for m in range(1, 13)
-    ]
-
-    # 如果不显示英文名，清空缓存避免网络调用
-    if not show_en:
-        fake_cache = {r["name"]: "" for r in filtered}
-        calendar_html = build_calendar_html(filtered, selected_brands, months, fake_cache)
-    else:
-        calendar_html = build_calendar_html(filtered, selected_brands, months, translation_cache)
-
-    # ── 月历表格 ──
-    st.components.v1.html(calendar_html, height=800, scrolling=True)
-
-    # ── 侧边栏：产品详情 ──
-    show_product_detail(records, translation_cache if show_en else {r["name"]: "" for r in records})
-
-    # ── 数据表格（可下载）──
-    with st.expander("📊 查看原始数据表格 / 下载 CSV"):
-        import pandas as pd
-        df = pd.DataFrame(filtered).drop(columns=["year", "month"], errors="ignore")
-        st.dataframe(df, use_container_width=True)
-        csv = df.to_csv(index=False, encoding="utf-8-sig")
-        st.download_button(
-            "⬇️ 下载 CSV",
-            csv,
-            file_name=f"ci_newsku_{selected_year}.csv",
-            mime="text/csv",
-        )
 
 
 if __name__ == "__main__":
