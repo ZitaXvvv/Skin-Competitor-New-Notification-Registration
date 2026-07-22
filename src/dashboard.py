@@ -536,13 +536,198 @@ def build_calendar_html(records, selected_brands, months, trans_cache) -> str:
     return html
 
 
+def _parse_ingr(s: str) -> list[str]:
+    """解析成分列表（逗号/中文逗号分隔）"""
+    import re
+    items = re.split(r"[，,、；\[\]【】\n]", s or "")
+    return [i.strip().strip("0123456789. ") for i in items if i.strip() and len(i.strip()) > 1]
+
+
+def _ingr_diff(list_a: list[str], list_b: list[str]) -> list[dict]:
+    """
+    比较两个成分列表，返回带状态的行：
+    same   - 位置变化 < 5
+    moved  - 位置变化 >= 5 (shift>0=前移, shift<0=后移)
+    added  - B有A没有
+    removed- A有B没有
+    """
+    pos_a = {x.lower(): i for i, x in enumerate(list_a)}
+    pos_b = {x.lower(): i for i, x in enumerate(list_b)}
+    rows = []
+    for i, name in enumerate(list_a):
+        key = name.lower()
+        if key in pos_b:
+            j = pos_b[key]
+            shift = i - j
+            rows.append({"name": name, "status": "moved" if abs(shift) >= 5 else "same",
+                         "pos_a": i + 1, "pos_b": j + 1, "shift": shift})
+        else:
+            rows.append({"name": name, "status": "removed", "pos_a": i + 1, "pos_b": None, "shift": None})
+    for j, name in enumerate(list_b):
+        if name.lower() not in pos_a:
+            rows.append({"name": name, "status": "added", "pos_a": None, "pos_b": j + 1, "shift": None})
+
+    def _sort(r):
+        return r["pos_b"] if r["pos_b"] is not None else (r["pos_a"] or 999) + 5000
+
+    return sorted(rows, key=_sort)
+
+
+CMP_CSS = """
+<style>
+.cmp-zone { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; }
+.cmp-title { font-size:16px; font-weight:700; color:#1a2b4a; margin-bottom:12px; }
+.cmp-grid { display:grid; grid-template-columns:40px 1fr 70px 50px 50px; gap:3px; font-size:12px; }
+.cmp-head { font-weight:700; color:#8898aa; font-size:10px; text-transform:uppercase;
+            padding:4px 6px; background:#f8f9fb; border-radius:4px; }
+.cmp-row  { display:contents; }
+.cmp-cell { padding:4px 6px; border-bottom:1px solid #f5f5f5; }
+.cmp-cell.same    { color:#374151; }
+.cmp-cell.moved-u { color:#1565c0; background:#e3f2fd; border-radius:3px; }
+.cmp-cell.moved-d { color:#e65100; background:#fff3e0; border-radius:3px; }
+.cmp-cell.added   { color:#1b5e20; background:#e8f5e9; border-radius:3px; }
+.cmp-cell.removed { color:#b71c1c; background:#ffebee; border-radius:3px; text-decoration:line-through; }
+.cmp-legend { display:flex; gap:12px; font-size:11px; margin-bottom:10px; flex-wrap:wrap; }
+.leg { padding:2px 8px; border-radius:10px; }
+</style>
+"""
+
+
+def _render_comparison_zone(records: list[dict]):
+    """底部成分对比区：选两个产品，展示成分增删/位置变化"""
+    st.markdown("---")
+    st.markdown(CMP_CSS, unsafe_allow_html=True)
+    st.markdown("""
+    <div style='font-size:18px;font-weight:700;color:#1a2b4a;margin-bottom:6px'>
+      🔬 成分对比区 <span style='font-size:12px;color:#8898aa;font-weight:400'>（最多2个SKU）</span>
+    </div>
+    <div style='font-size:12px;color:#8898aa;margin-bottom:12px'>
+      从下方选择两个产品，自动对比成分：🟢 新增 &nbsp; 🔴 删除 &nbsp; 🔵 前移 &nbsp; 🟠 后移
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 只有含成分信息的产品可对比
+    ingr_recs = [r for r in records if r.get("ingredients") and len(r["ingredients"]) > 10]
+    if len(ingr_recs) < 2:
+        st.info("成分数据不足，请先运行模块1/2 补全成分列表")
+        return
+
+    # 产品标签：品牌 · 名称 (备案号末8位)
+    def label(r):
+        reg_tail = r["reg_num"][-10:] if r["reg_num"] else ""
+        name = r["name"][:20]
+        return f"{r['brand_en']} · {name} ({reg_tail})"
+
+    labels = [label(r) for r in ingr_recs]
+
+    col_a, col_b, col_btn = st.columns([5, 5, 2])
+    with col_a:
+        idx_a = st.selectbox("🅰 产品 A", ["— 请选择 —"] + labels, key="cmp_sel_a")
+    with col_b:
+        idx_b = st.selectbox("🅱 产品 B（与A对比）", ["— 请选择 —"] + labels, key="cmp_sel_b")
+    with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🗑 清空对比", use_container_width=True):
+            st.session_state.cmp_sel_a = "— 请选择 —"
+            st.session_state.cmp_sel_b = "— 请选择 —"
+            st.rerun()
+
+    if idx_a == "— 请选择 —" or idx_b == "— 请选择 —":
+        st.caption("👆 选择两个产品后，自动显示成分对比")
+        return
+    if idx_a == idx_b:
+        st.warning("请选择不同的两个产品")
+        return
+
+    prod_a = ingr_recs[labels.index(idx_a)]
+    prod_b = ingr_recs[labels.index(idx_b)]
+    list_a = _parse_ingr(prod_a["ingredients"])
+    list_b = _parse_ingr(prod_b["ingredients"])
+
+    if not list_a or not list_b:
+        st.warning("其中一个产品的成分列表为空，无法对比")
+        return
+
+    diff = _ingr_diff(list_a, list_b)
+
+    # 统计
+    added   = sum(1 for d in diff if d["status"] == "added")
+    removed = sum(1 for d in diff if d["status"] == "removed")
+    moved   = sum(1 for d in diff if d["status"] == "moved")
+
+    # 产品信息卡
+    info_col_a, info_col_b = st.columns(2)
+    with info_col_a:
+        st.markdown(f"""
+        <div style='background:#f0f7ff;border-radius:8px;padding:10px 14px;border-left:4px solid #1565c0'>
+          <b>🅰 {prod_a["brand_en"]}</b><br>
+          <span style='font-size:12px'>{prod_a["name"]}</span><br>
+          <code style='font-size:10px'>{prod_a["reg_num"]}</code><br>
+          <span style='font-size:10px;color:#666'>{prod_a["notif_date"]} · {len(list_a)} 种成分</span>
+        </div>""", unsafe_allow_html=True)
+    with info_col_b:
+        st.markdown(f"""
+        <div style='background:#fff8f0;border-radius:8px;padding:10px 14px;border-left:4px solid #e65100'>
+          <b>🅱 {prod_b["brand_en"]}</b><br>
+          <span style='font-size:12px'>{prod_b["name"]}</span><br>
+          <code style='font-size:10px'>{prod_b["reg_num"]}</code><br>
+          <span style='font-size:10px;color:#666'>{prod_b["notif_date"]} · {len(list_b)} 种成分</span>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div style='margin:12px 0 8px;font-size:13px'>
+      🟢 <b>新增</b> {added} 种 &nbsp;
+      🔴 <b>删除</b> {removed} 种 &nbsp;
+      🔵 <b>前移≥5位</b> {sum(1 for d in diff if d["status"]=="moved" and (d["shift"] or 0)>0)} 种 &nbsp;
+      🟠 <b>后移≥5位</b> {sum(1 for d in diff if d["status"]=="moved" and (d["shift"] or 0)<0)} 种
+    </div>""", unsafe_allow_html=True)
+
+    # 对比表格
+    rows_html = ""
+    for d in diff:
+        if d["status"] == "added":
+            cls, pos_a_txt, pos_b_txt, arrow = "added", "—", str(d["pos_b"]), "🆕"
+        elif d["status"] == "removed":
+            cls, pos_a_txt, pos_b_txt, arrow = "removed", str(d["pos_a"]), "—", "❌"
+        elif d["status"] == "moved":
+            sh = d["shift"] or 0
+            if sh > 0:
+                cls, arrow = "moved-u", f"↑{sh}"
+            else:
+                cls, arrow = "moved-d", f"↓{abs(sh)}"
+            pos_a_txt, pos_b_txt = str(d["pos_a"]), str(d["pos_b"])
+        else:
+            cls, pos_a_txt, pos_b_txt, arrow = "same", str(d["pos_a"]), str(d["pos_b"]), "="
+
+        rows_html += f"""
+        <div class="cmp-row">
+          <div class="cmp-cell {cls}" style="text-align:center">{arrow}</div>
+          <div class="cmp-cell {cls}">{d["name"]}</div>
+          <div class="cmp-cell {cls}" style="text-align:center;font-size:10px;color:#888">{pos_a_txt}→{pos_b_txt}</div>
+          <div class="cmp-cell {cls}" style="text-align:center">{pos_a_txt}</div>
+          <div class="cmp-cell {cls}" style="text-align:center">{pos_b_txt}</div>
+        </div>"""
+
+    table_html = f"""
+    <div class="cmp-zone">
+      <div class="cmp-grid">
+        <div class="cmp-head">变化</div>
+        <div class="cmp-head">成分名称</div>
+        <div class="cmp-head">位置</div>
+        <div class="cmp-head">A位</div>
+        <div class="cmp-head">B位</div>
+        {rows_html}
+      </div>
+    </div>"""
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
 # ─────────────────────────────────────────────
 # 主界面
 # ─────────────────────────────────────────────
 def main():
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
-    # Hero 标题
     st.markdown("""
     <div class="hero">
       <h1>🔬 Competitor Intelligence · New SKU Tracker</h1>
@@ -555,43 +740,47 @@ def main():
         st.error("⚠️ 未读到数据，请先运行：`python src/main.py --days 730`")
         st.stop()
 
-    # 批量翻译（8秒超时自动跳过，不阻塞页面）
-    trans_cache = get_translation_cache()
-    all_names = list({r["name"] for r in records})
-    trans_cache = translate_batch(all_names, trans_cache)
-
-    # ── 筛选栏 ──
     all_brand_keys = list(BRANDS.keys())
     all_years = sorted({r["year"] for r in records}, reverse=True)
 
-    with st.container():
-        fc1, fc2, fc3 = st.columns([3, 1, 1.5])
-        with fc1:
-            selected_brands = st.multiselect(
-                "📦 品牌筛选",
-                all_brand_keys,
-                default=all_brand_keys,
-                label_visibility="collapsed",
-                placeholder="选择品牌…",
-            )
-        with fc2:
-            selected_year = st.selectbox("📅 年份", all_years, label_visibility="collapsed")
-        with fc3:
-            reg_type_filter = st.selectbox(
-                "🏷 类型",
-                ["全部", "普通备案（含'备'）", "特殊注册（含'特'）"],
-                label_visibility="collapsed",
-            )
+    # ── 筛选栏 ──
+    c1, c2, c3, c4 = st.columns([3, 2, 1.5, 0.5])
 
-    # 过滤
+    with c1:
+        selected_brands = st.multiselect(
+            "品牌", all_brand_keys, default=all_brand_keys,
+            label_visibility="collapsed", placeholder="选择品牌（默认全选）…",
+        )
+    with c2:
+        selected_years = st.multiselect(
+            "年份（最多3年）", all_years,
+            default=all_years[:min(3, len(all_years))],
+            max_selections=3,
+            label_visibility="collapsed",
+        )
+    with c3:
+        reg_type_filter = st.selectbox(
+            "类型", ["全部", "普通备案", "特殊注册"],
+            label_visibility="collapsed",
+        )
+    with c4:
+        if st.button("全选品牌", use_container_width=True):
+            selected_brands = all_brand_keys
+
+    if not selected_brands:
+        selected_brands = all_brand_keys
+    if not selected_years:
+        selected_years = all_years[:1]
+
+    # ── 过滤 ──
     filtered = [
         r for r in records
         if r["brand_en"] in selected_brands
-        and r["year"] == selected_year
+        and r["year"] in selected_years
         and (
             reg_type_filter == "全部"
-            or (reg_type_filter.startswith("普通") and r["reg_type"] == "普通备案")
-            or (reg_type_filter.startswith("特殊") and r["reg_type"] == "特殊注册")
+            or (reg_type_filter == "普通备案" and r["reg_type"] == "普通备案")
+            or (reg_type_filter == "特殊注册" and r["reg_type"] == "特殊注册")
         )
     ]
 
@@ -599,45 +788,48 @@ def main():
     total   = len(filtered)
     normal  = sum(1 for r in filtered if r["reg_type"] == "普通备案")
     special = sum(1 for r in filtered if r["reg_type"] == "特殊注册")
-    brands_active = len({r["brand_en"] for r in filtered})
+    brands_n = len({r["brand_en"] for r in filtered})
 
     st.markdown(f"""
     <div class="stat-row">
-      <div class="stat-card blue">
-        <div class="label">Total Products</div>
-        <div class="value">{total}</div>
-      </div>
-      <div class="stat-card green">
-        <div class="label">🟢 普通备案</div>
-        <div class="value">{normal}</div>
-      </div>
-      <div class="stat-card red">
-        <div class="label">🔴 特殊注册</div>
-        <div class="value">{special}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Active Brands</div>
-        <div class="value">{brands_active}</div>
-      </div>
+      <div class="stat-card blue"><div class="label">Total Products</div><div class="value">{total}</div></div>
+      <div class="stat-card green"><div class="label">🟢 普通备案</div><div class="value">{normal}</div></div>
+      <div class="stat-card red"><div class="label">🔴 特殊注册</div><div class="value">{special}</div></div>
+      <div class="stat-card"><div class="label">Active Brands</div><div class="value">{brands_n}</div></div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 月历 ──
+    # ── 月历（每个选中年份一张）──
     month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
                     "Jul","Aug","Sep","Oct","Nov","Dec"]
-    months = [(f"{selected_year}-{m:02d}", month_labels[m-1]) for m in range(1, 13)]
+    empty_cache: dict = {}
 
-    calendar_html = build_calendar_html(filtered, selected_brands, months, trans_cache)
-    st.markdown(calendar_html, unsafe_allow_html=True)
+    for yr in sorted(selected_years, reverse=True):
+        yr_filtered = [r for r in filtered if r["year"] == yr]
+        if not yr_filtered:
+            continue
+        st.markdown(f"<h4 style='color:#1a2b4a;margin:18px 0 6px'>📅 {yr}</h4>",
+                    unsafe_allow_html=True)
+        months = [(f"{yr}-{m:02d}", month_labels[m-1]) for m in range(1, 13)]
+        cal_html = build_calendar_html(yr_filtered, selected_brands, months, empty_cache)
+        st.markdown(cal_html, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 原始数据下载 ──
+    # ── 成分对比区 ──
+    _render_comparison_zone(records)
+
+    # ── 数据下载 ──
     with st.expander("📊 原始数据 / 下载 CSV"):
         import pandas as pd
-        df = pd.DataFrame(filtered).drop(columns=["year","month"], errors="ignore")
-        # Add English names
-        df["name_en"] = df["name"].map(lambda x: trans_cache.get(x, ""))
+        df = pd.DataFrame(filtered).drop(columns=["year","month","source_file"],
+                                         errors="ignore")
+        st.dataframe(df, use_container_width=True)
+        st.download_button(
+            "⬇️ 下载 CSV",
+            df.to_csv(index=False, encoding="utf-8-sig"),
+            file_name=f"ci_newsku.csv", mime="text/csv"
+        )
         st.dataframe(df, use_container_width=True)
         csv = df.to_csv(index=False, encoding="utf-8-sig")
         st.download_button("⬇️ 下载 CSV",
