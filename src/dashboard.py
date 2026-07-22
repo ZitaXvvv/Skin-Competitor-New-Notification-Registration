@@ -495,10 +495,14 @@ def product_card_html(prod: dict, en_name: str) -> str:
     if prod["poc_url"]:
         btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn btn-poc">🧪 POC</a>'
 
-    en_block   = f'<div class="prod-en">{en_name[:50]}</div>' if en_name else ""
+    import re as _re2
+    # 英文翻译显示在 summary（折叠时可见）：仅当翻译结果与原名不同且包含>=3字母的英文词
+    en_shown = ""
+    if en_name and en_name != prod["name"] and _re2.search(r"[A-Za-z]{3,}", en_name):
+        en_shown = f'<div class="prod-en" style="margin:1px 0 2px">{en_name[:50]}</div>'
+
     eff_block  = f'<div class="prod-eff">{eff}</div>'  if eff else ""
     ingr_block = f'<div class="prod-ingr">{ingr_s}</div>' if ingr_s else ""
-    btn_block  = f'<div class="btn-row">{btns}</div>' if btns else ""
 
     card_cls = "prod-card special" if is_special else "prod-card"
     name_disp = prod["name"][:32]
@@ -521,10 +525,11 @@ def product_card_html(prod: dict, en_name: str) -> str:
         <span class="prod-name">{name_disp}</span>
         <span class="expand-hint"></span>
       </div>
+      {en_shown}
       {badge}
     </summary>
     <div class="prod-body">
-      {en_block}{eff_block}{ingr_block}
+      {eff_block}{ingr_block}
     </div>
   </details>
   {always_btn_block}
@@ -692,7 +697,18 @@ _FLOATING_CMP_CSS = """
     box-shadow: 0 -6px 20px rgba(0,0,0,.18);
     transition: height .28s ease; z-index: 9998;
   }
-  #cmp-drawer.open { height: 40vh; }
+  #cmp-drawer.open { height: 40vh; min-height: 120px; }
+  /* 拖拽调高把手 */
+  #cmp-resize-handle {
+    position: absolute; top: 0; left: 0; right: 0; height: 10px;
+    cursor: ns-resize; background: transparent;
+    display: flex; justify-content: center; align-items: center; z-index: 10;
+  }
+  #cmp-resize-handle::after {
+    content: '━━━━━━'; color: #c5cfe0; font-size: 8px; letter-spacing: 3px;
+    pointer-events: none;
+  }
+  #cmp-resize-handle:hover::after { color: #1565c0; }
   #cmp-drawer-inner { padding: 14px 22px; height: 100%; box-sizing: border-box; overflow-y: auto; }
   #cmp-drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   #cmp-drawer-header h3 { margin: 0; font-size: 15px; color: #1a2b4a; font-family: 'Inter', sans-serif; }
@@ -758,6 +774,7 @@ def _build_compare_widget_html(products_json: str) -> str:
     return f"""
 <button id="cmp-toggle-btn" onclick="cmpToggleDrawer()">🔬 Compare <span id="cmp-badge">0/2</span></button>
 <div id="cmp-drawer">
+  <div id="cmp-resize-handle" title="Drag to resize"></div>
   <div id="cmp-drawer-inner">
     <div id="cmp-drawer-header">
       <h3>🔬 Ingredient Comparison — drag 2 SKU cards here</h3>
@@ -917,6 +934,30 @@ def _build_compare_widget_html(products_json: str) -> str:
   }}
 
   cmpRenderSlots(); cmpUpdateBadge();
+
+  // 拖拽调整抽屉高度
+  var _cmpDragY = 0, _cmpDragH = 0, _cmpDragging = false;
+  document.getElementById('cmp-resize-handle').addEventListener('mousedown', function(e) {{
+    var drawer = document.getElementById('cmp-drawer');
+    if (!drawer.classList.contains('open')) return;
+    _cmpDragging = true;
+    _cmpDragY = e.clientY;
+    _cmpDragH = drawer.offsetHeight;
+    drawer.style.transition = 'none';
+    e.preventDefault();
+  }});
+  document.addEventListener('mousemove', function(e) {{
+    if (!_cmpDragging) return;
+    var delta = _cmpDragY - e.clientY;
+    var newH = Math.max(120, Math.min(window.innerHeight * 0.9, _cmpDragH + delta));
+    document.getElementById('cmp-drawer').style.height = newH + 'px';
+  }});
+  document.addEventListener('mouseup', function() {{
+    if (_cmpDragging) {{
+      _cmpDragging = false;
+      document.getElementById('cmp-drawer').style.transition = '';
+    }}
+  }});
 </script>
 """
 
@@ -971,7 +1012,7 @@ def _render_pdf_download_section(records: list[dict]):
                 continue
 
             st.markdown(f"**{brand_en} / {BRANDS[brand_en]}** ({len(brand_entries)}件)")
-            for p, local_path in brand_entries:
+            for i, (p, local_path) in enumerate(brand_entries):
                 cols = st.columns([4, 1, 1, 1])
                 cols[0].markdown(
                     f"<span style='font-size:12px'>{p['name'][:40]}</span>",
@@ -985,7 +1026,7 @@ def _render_pdf_download_section(records: list[dict]):
                         data=pdf_bytes,
                         file_name=local_path.name,
                         mime="application/pdf",
-                        key=f"dl_{brand_en}_{p['reg_num']}",
+                        key=f"dl_{brand_en}_{p['name'][:20]}_{i}",
                         use_container_width=True
                     )
                 else:
