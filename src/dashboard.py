@@ -501,7 +501,10 @@ def product_card_html(prod: dict, en_name: str) -> str:
 
     card_cls = "prod-card special" if is_special else "prod-card"
     name_disp = prod["name"][:32]
-    return f"""<div class="{card_cls}">
+    pid = prod.get("_pid", "")
+    drag_attrs = (f'draggable="true" data-pid="{pid}" ondragstart="cmpDragStart(event)"'
+                  if pid else "")
+    return f"""<div class="{card_cls}" {drag_attrs}>
   <details>
     <summary>
       <div class="sum-row">
@@ -650,183 +653,257 @@ def _parse_ingr(s: str) -> list[str]:
     return [i.strip().strip("0123456789. ") for i in items if i.strip() and len(i.strip()) > 1]
 
 
-def _ingr_diff(list_a: list[str], list_b: list[str]) -> list[dict]:
-    """
-    比较两个成分列表，返回带状态的行：
-    same   - 位置变化 < 5
-    moved  - 位置变化 >= 5 (shift>0=前移, shift<0=后移)
-    added  - B有A没有
-    removed- A有B没有
-    """
-    pos_a = {x.lower(): i for i, x in enumerate(list_a)}
-    pos_b = {x.lower(): i for i, x in enumerate(list_b)}
-    rows = []
-    for i, name in enumerate(list_a):
-        key = name.lower()
-        if key in pos_b:
-            j = pos_b[key]
-            shift = i - j
-            rows.append({"name": name, "status": "moved" if abs(shift) >= 5 else "same",
-                         "pos_a": i + 1, "pos_b": j + 1, "shift": shift})
-        else:
-            rows.append({"name": name, "status": "removed", "pos_a": i + 1, "pos_b": None, "shift": None})
-    for j, name in enumerate(list_b):
-        if name.lower() not in pos_a:
-            rows.append({"name": name, "status": "added", "pos_a": None, "pos_b": j + 1, "shift": None})
-
-    def _sort(r):
-        return r["pos_b"] if r["pos_b"] is not None else (r["pos_a"] or 999) + 5000
-
-    return sorted(rows, key=_sort)
-
-
-CMP_CSS = """
+# ─────────────────────────────────────────────
+# 悬浮成分对比层：拖拽 SKU 卡片放入 → JS 端计算成分差异
+# （整页月历 + 悬浮层渲染在同一个 components.v1.html 文档里，
+#   这样拖拽事件才能在同一 DOM 内被捕获）
+# ─────────────────────────────────────────────
+_FLOATING_CMP_CSS = """
 <style>
-.cmp-zone { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; }
-.cmp-title { font-size:16px; font-weight:700; color:#1a2b4a; margin-bottom:12px; }
-.cmp-grid { display:grid; grid-template-columns:40px 1fr 70px 50px 50px; gap:3px; font-size:12px; }
-.cmp-head { font-weight:700; color:#8898aa; font-size:10px; text-transform:uppercase;
-            padding:4px 6px; background:#f8f9fb; border-radius:4px; }
-.cmp-row  { display:contents; }
-.cmp-cell { padding:4px 6px; border-bottom:1px solid #f5f5f5; }
-.cmp-cell.same    { color:#374151; }
-.cmp-cell.moved-u { color:#1565c0; background:#e3f2fd; border-radius:3px; }
-.cmp-cell.moved-d { color:#e65100; background:#fff3e0; border-radius:3px; }
-.cmp-cell.added   { color:#1b5e20; background:#e8f5e9; border-radius:3px; }
-.cmp-cell.removed { color:#b71c1c; background:#ffebee; border-radius:3px; text-decoration:line-through; }
-.cmp-legend { display:flex; gap:12px; font-size:11px; margin-bottom:10px; flex-wrap:wrap; }
-.leg { padding:2px 8px; border-radius:10px; }
+  .prod-card[draggable="true"] { cursor: grab; }
+  .prod-card[draggable="true"]:active { cursor: grabbing; }
+  .prod-card[draggable="true"] summary::before {
+    content: "⠿"; color: #c5cfe0; font-size: 10px; margin-right: 4px;
+  }
+
+  #cmp-toggle-btn {
+    position: fixed; right: 20px; bottom: 20px;
+    background: #1565c0; color: #fff; border: none; border-radius: 30px;
+    padding: 10px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25); z-index: 9999;
+    display: flex; align-items: center; gap: 6px;
+  }
+  #cmp-toggle-btn:hover { background: #0d47a1; }
+
+  #cmp-drawer {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 0; overflow: hidden;
+    background: #fff; border-top: 2px solid #1565c0;
+    box-shadow: 0 -6px 20px rgba(0,0,0,.18);
+    transition: height .28s ease; z-index: 9998;
+  }
+  #cmp-drawer.open { height: 40vh; }
+  #cmp-drawer-inner { padding: 14px 22px; height: 100%; box-sizing: border-box; overflow-y: auto; }
+  #cmp-drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  #cmp-drawer-header h3 { margin: 0; font-size: 15px; color: #1a2b4a; font-family: 'Inter', sans-serif; }
+  .cmp-close-btn { background: #f0f2f5; border: none; font-size: 13px; cursor: pointer;
+                   color: #5f7089; border-radius: 6px; padding: 3px 9px; margin-left: 6px; }
+  .cmp-close-btn:hover { background: #e2e8f0; }
+
+  .cmp-slots { display: flex; gap: 14px; margin-bottom: 10px; }
+  .cmp-slot {
+    flex: 1; min-height: 66px; border: 2px dashed #c5cfe0; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; padding: 8px;
+    font-size: 12px; color: #9aa5b1; text-align: center; transition: .15s;
+  }
+  .cmp-slot.filled { border-style: solid; border-color: #1565c0; background: #f5f9ff;
+                     color: #1a2b4a; flex-direction: column; align-items: flex-start; text-align: left; }
+  .cmp-slot.dragover { background: #e3f2fd; border-color: #1565c0; }
+  .cmp-slot .slot-brand { font-weight: 700; font-size: 12px; }
+  .cmp-slot .slot-name  { font-size: 11px; margin: 2px 0; }
+  .cmp-slot .slot-reg   { font-size: 9px; color: #666; font-family: monospace; }
+  .cmp-slot .slot-clear { align-self: flex-end; background: #eee; border: none; border-radius: 4px;
+                           font-size: 10px; padding: 2px 6px; cursor: pointer; margin-top: 4px; }
+
+  .cmp-grid { display: grid; grid-template-columns: 70px 1fr 60px 60px; gap: 3px; font-size: 12px; }
+  .cmp-head { font-weight: 700; color: #8898aa; font-size: 10px; text-transform: uppercase;
+              padding: 4px 6px; background: #f8f9fb; border-radius: 4px; }
+  .cmp-row  { display: contents; }
+  .cmp-cell { padding: 4px 6px; border-bottom: 1px solid #f5f5f5; }
+  .cmp-cell.same    { color: #374151; }
+  .cmp-cell.moved-u { color: #1565c0; background: #e3f2fd; border-radius: 3px; }
+  .cmp-cell.moved-d { color: #e65100; background: #fff3e0; border-radius: 3px; }
+  .cmp-cell.added   { color: #1b5e20; background: #e8f5e9; border-radius: 3px; }
+  .cmp-cell.removed { color: #b71c1c; background: #ffebee; border-radius: 3px; text-decoration: line-through; }
 </style>
 """
 
 
-def _render_comparison_zone(records: list[dict]):
-    """底部成分对比区：选两个产品，展示成分增删/位置变化"""
-    st.markdown("---")
-    st.markdown(CMP_CSS, unsafe_allow_html=True)
-    st.markdown("""
-    <div style='font-size:18px;font-weight:700;color:#1a2b4a;margin-bottom:6px'>
-      🔬 成分对比区 <span style='font-size:12px;color:#8898aa;font-weight:400'>（最多2个SKU）</span>
-    </div>
-    <div style='font-size:12px;color:#8898aa;margin-bottom:12px'>
-      从下方选择两个产品，自动对比成分：🟢 新增 &nbsp; 🔴 删除 &nbsp; 🔵 前移 &nbsp; 🟠 后移
-    </div>
-    """, unsafe_allow_html=True)
+def _build_products_map(filtered: list[dict]) -> str:
+    """构建供悬浮层 JS 使用的产品字典（含已翻译成分列表），返回 JSON 字符串"""
+    products: dict[str, dict] = {}
+    for r in filtered:
+        pid = r.get("_pid")
+        if not pid:
+            continue
+        zh_list = _parse_ingr(r.get("ingredients", ""))
+        en_list = [(_translate_ingr(x) or x) for x in zh_list]
+        products[pid] = {
+            "name": r["name"],
+            "brand": r["brand_en"],
+            "reg": r["reg_num"],
+            "date": str(r["notif_date"]),
+            "ingr": en_list,
+        }
+    return json.dumps(products, ensure_ascii=False)
 
-    # 只有含成分信息的产品可对比
-    ingr_recs = [r for r in records if r.get("ingredients") and len(r["ingredients"]) > 10]
-    if len(ingr_recs) < 2:
-        st.info("成分数据不足，请先运行模块1/2 补全成分列表")
-        return
 
-    # 产品标签：品牌 · 名称 (备案号末8位)
-    def label(r):
-        reg_tail = r["reg_num"][-10:] if r["reg_num"] else ""
-        name = r["name"][:20]
-        return f"{r['brand_en']} · {name} ({reg_tail})"
-
-    labels = [label(r) for r in ingr_recs]
-
-    col_a, col_b, col_btn = st.columns([5, 5, 2])
-    with col_a:
-        idx_a = st.selectbox("🅰 产品 A", ["— 请选择 —"] + labels, key="cmp_sel_a")
-    with col_b:
-        idx_b = st.selectbox("🅱 产品 B（与A对比）", ["— 请选择 —"] + labels, key="cmp_sel_b")
-    with col_btn:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🗑 清空对比", use_container_width=True):
-            st.session_state.cmp_sel_a = "— 请选择 —"
-            st.session_state.cmp_sel_b = "— 请选择 —"
-            st.rerun()
-
-    if idx_a == "— 请选择 —" or idx_b == "— 请选择 —":
-        st.caption("👆 选择两个产品后，自动显示成分对比")
-        return
-    if idx_a == idx_b:
-        st.warning("请选择不同的两个产品")
-        return
-
-    prod_a = ingr_recs[labels.index(idx_a)]
-    prod_b = ingr_recs[labels.index(idx_b)]
-    list_a = _parse_ingr(prod_a["ingredients"])
-    list_b = _parse_ingr(prod_b["ingredients"])
-
-    if not list_a or not list_b:
-        st.warning("其中一个产品的成分列表为空，无法对比")
-        return
-
-    diff = _ingr_diff(list_a, list_b)
-
-    # 统计
-    added   = sum(1 for d in diff if d["status"] == "added")
-    removed = sum(1 for d in diff if d["status"] == "removed")
-    moved   = sum(1 for d in diff if d["status"] == "moved")
-
-    # 产品信息卡
-    info_col_a, info_col_b = st.columns(2)
-    with info_col_a:
-        st.markdown(f"""
-        <div style='background:#f0f7ff;border-radius:8px;padding:10px 14px;border-left:4px solid #1565c0'>
-          <b>🅰 {prod_a["brand_en"]}</b><br>
-          <span style='font-size:12px'>{prod_a["name"]}</span><br>
-          <code style='font-size:10px'>{prod_a["reg_num"]}</code><br>
-          <span style='font-size:10px;color:#666'>{prod_a["notif_date"]} · {len(list_a)} 种成分</span>
-        </div>""", unsafe_allow_html=True)
-    with info_col_b:
-        st.markdown(f"""
-        <div style='background:#fff8f0;border-radius:8px;padding:10px 14px;border-left:4px solid #e65100'>
-          <b>🅱 {prod_b["brand_en"]}</b><br>
-          <span style='font-size:12px'>{prod_b["name"]}</span><br>
-          <code style='font-size:10px'>{prod_b["reg_num"]}</code><br>
-          <span style='font-size:10px;color:#666'>{prod_b["notif_date"]} · {len(list_b)} 种成分</span>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div style='margin:12px 0 8px;font-size:13px'>
-      🟢 <b>新增</b> {added} 种 &nbsp;
-      🔴 <b>删除</b> {removed} 种 &nbsp;
-      🔵 <b>前移≥5位</b> {sum(1 for d in diff if d["status"]=="moved" and (d["shift"] or 0)>0)} 种 &nbsp;
-      🟠 <b>后移≥5位</b> {sum(1 for d in diff if d["status"]=="moved" and (d["shift"] or 0)<0)} 种
-    </div>""", unsafe_allow_html=True)
-
-    # 对比表格
-    rows_html = ""
-    for d in diff:
-        if d["status"] == "added":
-            cls, pos_a_txt, pos_b_txt, arrow = "added", "—", str(d["pos_b"]), "🆕"
-        elif d["status"] == "removed":
-            cls, pos_a_txt, pos_b_txt, arrow = "removed", str(d["pos_a"]), "—", "❌"
-        elif d["status"] == "moved":
-            sh = d["shift"] or 0
-            if sh > 0:
-                cls, arrow = "moved-u", f"↑{sh}"
-            else:
-                cls, arrow = "moved-d", f"↓{abs(sh)}"
-            pos_a_txt, pos_b_txt = str(d["pos_a"]), str(d["pos_b"])
-        else:
-            cls, pos_a_txt, pos_b_txt, arrow = "same", str(d["pos_a"]), str(d["pos_b"]), "="
-
-        rows_html += f"""
-        <div class="cmp-row">
-          <div class="cmp-cell {cls}" style="text-align:center">{arrow}</div>
-          <div class="cmp-cell {cls}">{d["name"]}</div>
-          <div class="cmp-cell {cls}" style="text-align:center;font-size:10px;color:#888">{pos_a_txt}→{pos_b_txt}</div>
-          <div class="cmp-cell {cls}" style="text-align:center">{pos_a_txt}</div>
-          <div class="cmp-cell {cls}" style="text-align:center">{pos_b_txt}</div>
-        </div>"""
-
-    table_html = f"""
-    <div class="cmp-zone">
-      <div class="cmp-grid">
-        <div class="cmp-head">变化</div>
-        <div class="cmp-head">成分名称</div>
-        <div class="cmp-head">位置</div>
-        <div class="cmp-head">A位</div>
-        <div class="cmp-head">B位</div>
-        {rows_html}
+def _build_compare_widget_html(products_json: str) -> str:
+    """悬浮开关按钮 + 可展开抽屉（两个拖拽槽 + JS 成分对比表）"""
+    return f"""
+<button id="cmp-toggle-btn" onclick="cmpToggleDrawer()">🔬 Compare <span id="cmp-badge">0/2</span></button>
+<div id="cmp-drawer">
+  <div id="cmp-drawer-inner">
+    <div id="cmp-drawer-header">
+      <h3>🔬 Ingredient Comparison — drag 2 SKU cards here</h3>
+      <div>
+        <button class="cmp-close-btn" title="Clear both" onclick="cmpClearAll()">🗑 Clear</button>
+        <button class="cmp-close-btn" title="Close" onclick="cmpToggleDrawer(false)">✕ Close</button>
       </div>
-    </div>"""
-    st.markdown(table_html, unsafe_allow_html=True)
+    </div>
+    <div class="cmp-slots">
+      <div class="cmp-slot" id="cmp-slot-A"
+           ondragover="cmpAllowDrop(event)" ondragleave="cmpDragLeave(event)" ondrop="cmpDropSlot(event,'A')">
+        Drag SKU A here
+      </div>
+      <div class="cmp-slot" id="cmp-slot-B"
+           ondragover="cmpAllowDrop(event)" ondragleave="cmpDragLeave(event)" ondrop="cmpDropSlot(event,'B')">
+        Drag SKU B here
+      </div>
+    </div>
+    <div id="cmp-diff-area">
+      <p style="color:#9aa5b1;font-size:12px;margin-top:6px">
+        Drop two SKU cards above to compare ingredients (🟢 added · 🔴 removed · 🔵 moved up ≥5 · 🟠 moved down ≥5).
+      </p>
+    </div>
+  </div>
+</div>
+<script>
+  var PRODUCTS = {products_json};
+  var cmpSlots = {{A: null, B: null}};
+
+  function cmpDragStart(ev) {{
+    var pid = ev.currentTarget.getAttribute('data-pid');
+    if (!pid) {{ ev.preventDefault(); return; }}
+    ev.dataTransfer.setData('text/plain', pid);
+    ev.dataTransfer.effectAllowed = 'copy';
+  }}
+  function cmpAllowDrop(ev) {{ ev.preventDefault(); ev.currentTarget.classList.add('dragover'); }}
+  function cmpDragLeave(ev) {{ ev.currentTarget.classList.remove('dragover'); }}
+  function cmpDropSlot(ev, key) {{
+    ev.preventDefault();
+    ev.currentTarget.classList.remove('dragover');
+    var pid = ev.dataTransfer.getData('text/plain');
+    if (!pid || !(pid in PRODUCTS)) return;
+    cmpSlots[key] = pid;
+    cmpRenderSlots(); cmpRenderDiff(); cmpUpdateBadge();
+    var drawer = document.getElementById('cmp-drawer');
+    if (!drawer.classList.contains('open')) drawer.classList.add('open');
+  }}
+  function cmpClearSlot(key) {{
+    cmpSlots[key] = null;
+    cmpRenderSlots(); cmpRenderDiff(); cmpUpdateBadge();
+  }}
+  function cmpClearAll() {{
+    cmpSlots = {{A: null, B: null}};
+    cmpRenderSlots(); cmpRenderDiff(); cmpUpdateBadge();
+  }}
+  function cmpToggleDrawer(force) {{
+    var d = document.getElementById('cmp-drawer');
+    if (force === true) d.classList.add('open');
+    else if (force === false) d.classList.remove('open');
+    else d.classList.toggle('open');
+  }}
+  function cmpUpdateBadge() {{
+    var n = (cmpSlots.A ? 1 : 0) + (cmpSlots.B ? 1 : 0);
+    document.getElementById('cmp-badge').innerText = n + '/2';
+  }}
+  function cmpRenderSlots() {{
+    ['A', 'B'].forEach(function(key) {{
+      var el = document.getElementById('cmp-slot-' + key);
+      var pid = cmpSlots[key];
+      if (!pid) {{
+        el.className = 'cmp-slot';
+        el.innerHTML = 'Drag SKU ' + key + ' here';
+      }} else {{
+        var p = PRODUCTS[pid];
+        el.className = 'cmp-slot filled';
+        el.innerHTML = '<div class="slot-brand">' + key + ' · ' + p.brand + '</div>' +
+          '<div class="slot-name">' + p.name + '</div>' +
+          '<div class="slot-reg">' + (p.reg || '') + '</div>' +
+          '<button class="slot-clear" onclick="cmpClearSlot(\\'' + key + '\\')">✕ remove</button>';
+      }}
+    }});
+  }}
+  function cmpIngrDiff(listA, listB) {{
+    var posA = {{}}, posB = {{}};
+    listA.forEach(function(x, i) {{ var k = x.toLowerCase(); if (!(k in posA)) posA[k] = i; }});
+    listB.forEach(function(x, i) {{ var k = x.toLowerCase(); if (!(k in posB)) posB[k] = i; }});
+    var rows = [];
+    listA.forEach(function(name, i) {{
+      var key = name.toLowerCase();
+      if (key in posB) {{
+        var j = posB[key], shift = i - j;
+        rows.push({{name: name, status: Math.abs(shift) >= 5 ? 'moved' : 'same',
+                    posA: i + 1, posB: j + 1, shift: shift}});
+      }} else {{
+        rows.push({{name: name, status: 'removed', posA: i + 1, posB: null, shift: null}});
+      }}
+    }});
+    listB.forEach(function(name, j) {{
+      var key = name.toLowerCase();
+      if (!(key in posA)) rows.push({{name: name, status: 'added', posA: null, posB: j + 1, shift: null}});
+    }});
+    rows.sort(function(a, b) {{
+      var sa = a.posB !== null ? a.posB : (a.posA || 999) + 5000;
+      var sb = b.posB !== null ? b.posB : (b.posA || 999) + 5000;
+      return sa - sb;
+    }});
+    return rows;
+  }}
+  function cmpRenderDiff() {{
+    var container = document.getElementById('cmp-diff-area');
+    var a = cmpSlots.A ? PRODUCTS[cmpSlots.A] : null;
+    var b = cmpSlots.B ? PRODUCTS[cmpSlots.B] : null;
+    if (!a || !b) {{
+      container.innerHTML = '<p style="color:#9aa5b1;font-size:12px;margin-top:6px">' +
+        'Drop two SKU cards above to compare ingredients (🟢 added · 🔴 removed · 🔵 moved up ≥5 · 🟠 moved down ≥5).</p>';
+      return;
+    }}
+    if (!a.ingr.length || !b.ingr.length) {{
+      container.innerHTML = '<p style="color:#e65100;font-size:12px;margin-top:6px">' +
+        '⚠️ One of the selected products has no ingredient data.</p>';
+      return;
+    }}
+    var diff = cmpIngrDiff(a.ingr, b.ingr);
+    var added = diff.filter(function(d) {{ return d.status === 'added'; }}).length;
+    var removed = diff.filter(function(d) {{ return d.status === 'removed'; }}).length;
+    var up = diff.filter(function(d) {{ return d.status === 'moved' && d.shift > 0; }}).length;
+    var down = diff.filter(function(d) {{ return d.status === 'moved' && d.shift < 0; }}).length;
+
+    var rowsHtml = '';
+    diff.forEach(function(d) {{
+      var cls, arrow, pa, pb;
+      if (d.status === 'added') {{ cls = 'added'; arrow = '🟢 NEW'; pa = '—'; pb = d.posB; }}
+      else if (d.status === 'removed') {{ cls = 'removed'; arrow = '🔴 OUT'; pa = d.posA; pb = '—'; }}
+      else if (d.status === 'moved') {{
+        if (d.shift > 0) {{ cls = 'moved-u'; arrow = '🔵 ↑' + d.shift; }}
+        else {{ cls = 'moved-d'; arrow = '🟠 ↓' + Math.abs(d.shift); }}
+        pa = d.posA; pb = d.posB;
+      }} else {{ cls = 'same'; arrow = '='; pa = d.posA; pb = d.posB; }}
+      rowsHtml += '<div class="cmp-row">' +
+        '<div class="cmp-cell ' + cls + '" style="text-align:center">' + arrow + '</div>' +
+        '<div class="cmp-cell ' + cls + '">' + d.name + '</div>' +
+        '<div class="cmp-cell ' + cls + '" style="text-align:center">' + pa + '</div>' +
+        '<div class="cmp-cell ' + cls + '" style="text-align:center">' + pb + '</div>' +
+        '</div>';
+    }});
+
+    container.innerHTML =
+      '<div style="font-size:12px;margin:6px 0 8px">' +
+      '<span style="color:#1b5e20"><b>+' + added + ' Added</b></span> &nbsp; ' +
+      '<span style="color:#b71c1c"><b>-' + removed + ' Removed</b></span> &nbsp; ' +
+      '<span style="color:#1565c0"><b>↑' + up + ' Moved Up ≥5</b></span> &nbsp; ' +
+      '<span style="color:#e65100"><b>↓' + down + ' Moved Down ≥5</b></span>' +
+      '</div>' +
+      '<div class="cmp-grid">' +
+      '<div class="cmp-head">Change</div><div class="cmp-head">Ingredient</div>' +
+      '<div class="cmp-head">Pos A</div><div class="cmp-head">Pos B</div>' +
+      rowsHtml + '</div>';
+  }}
+
+  cmpRenderSlots(); cmpUpdateBadge();
+</script>
+"""
 
 
 # ─────────────────────────────────────────────
@@ -913,43 +990,54 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 月历（每个选中年份一张）──
+    # ── 月历（每个选中年份一张）+ 悬浮成分对比层 ──
+    # 悬浮层需要和卡片在同一个 DOM 内才能捕获拖拽事件，所以把所有年份的
+    # 月历 + 悬浮开关按钮 + 抽屉一起放进一个 components.v1.html 文档里渲染。
+    for i, r in enumerate(filtered):
+        r["_pid"] = f"p{i}"
+
     month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
                     "Jul","Aug","Sep","Oct","Nov","Dec"]
-    empty_cache: dict = {}
 
+    year_sections = ""
     for yr in sorted(selected_years, reverse=True):
         yr_filtered = [r for r in filtered if r["year"] == yr]
         if not yr_filtered:
             continue
-        st.markdown(f"<h4 style='color:#1a2b4a;margin:18px 0 6px'>📅 {yr}</h4>",
-                    unsafe_allow_html=True)
         months = [(f"{yr}-{m:02d}", month_labels[m-1]) for m in range(1, 13)]
-        cal_html = build_calendar_html(yr_filtered, selected_brands, months, empty_cache)
-        st.markdown(cal_html, unsafe_allow_html=True)
+        cal_html = build_calendar_html(yr_filtered, selected_brands, months, {})
+        year_sections += f"""
+        <h3 style="color:#1a2b4a;margin:18px 0 6px;font-family:'Inter',sans-serif">📅 {yr}</h3>
+        {cal_html}"""
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    products_json = _build_products_map(filtered)
+    compare_widget_html = _build_compare_widget_html(products_json)
 
-    # ── 成分对比区 ──
-    _render_comparison_zone(records)
+    full_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+{GLOBAL_CSS}
+{_FLOATING_CMP_CSS}
+</head><body style="margin:0;padding:8px 4px 70px;background:#f7f9fc">
+{year_sections}
+{compare_widget_html}
+</body></html>"""
+
+    # 固定高度 + 内部滚动条：悬浮按钮/抽屉的 position:fixed 是相对这个
+    # iframe 自身可视区域的，只有高度固定、内容用内部滚动条滚动，才能让
+    # 悬浮层在"滚动年份/品牌"时始终保持可见。
+    FRAME_HEIGHT = 820
+    st.iframe(full_html, height=FRAME_HEIGHT)
 
     # ── 数据下载 ──
     with st.expander("📊 原始数据 / 下载 CSV"):
         import pandas as pd
-        df = pd.DataFrame(filtered).drop(columns=["year","month","source_file"],
+        df = pd.DataFrame(filtered).drop(columns=["year", "month", "source_file", "_pid"],
                                          errors="ignore")
         st.dataframe(df, use_container_width=True)
         st.download_button(
             "⬇️ 下载 CSV",
             df.to_csv(index=False, encoding="utf-8-sig"),
-            file_name=f"ci_newsku.csv", mime="text/csv"
+            file_name="ci_newsku.csv", mime="text/csv"
         )
-        st.dataframe(df, use_container_width=True)
-        csv = df.to_csv(index=False, encoding="utf-8-sig")
-        st.download_button("⬇️ 下载 CSV",
-                           csv,
-                           file_name=f"ci_newsku_{selected_year}.csv",
-                           mime="text/csv")
 
 
 if __name__ == "__main__":
