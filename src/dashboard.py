@@ -281,9 +281,12 @@ _REG_PAT_GLOBAL = _re_global.compile(
 )
 
 # 前端不展示：唇部类产品 & 男士类产品
+# 名称关键词：含"唇"字的都排除（涵盖唇油/唇蜜/唇露/唇膏/唇彩/唇釉/润唇等）
 _EXCLUDE_NAME_PAT = _re_global.compile(
-    r"唇釉|唇膏|唇彩|唇线笔|口红|润唇|唇部|男士|男仕"
+    r"唇|口红|男士|男仕"
 )
+# 类目关键词：category 列含"唇"字也排除
+_EXCLUDE_CAT_PAT = _re_global.compile(r"唇")
 
 
 def _excel_files_to_load() -> list[Path]:
@@ -345,7 +348,11 @@ def _load_one_excel(path: Path, seen_regs: set, records: list):
                 continue
 
             # 排除唇部/男士类产品，不在前端展示
+            # 同时检查 category 列（部分产品名称无"唇"字但类目是唇部）
+            category_raw = g(COL_CATEGORY)
             if _EXCLUDE_NAME_PAT.search(str(name_raw)):
+                continue
+            if category_raw and _EXCLUDE_CAT_PAT.search(str(category_raw)):
                 continue
 
             notif_date = _parse_notif_date(notif_raw, upload_raw)
