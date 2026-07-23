@@ -25,3 +25,4 @@ src/translations_cache.json
 src/checkpoint.json
 src/admins.json
 log/admin_actions.log
+src/secrets_local.json

@@ -46,11 +46,26 @@ HZPBA_PDF_BASE = (
 )
 
 # ===== SharePoint 配置 =====
+# 敏感凭据（client_id/client_secret/tenant_id）不再硬编码在这里，改为从本地
+# 不进git的 secrets_local.json 读取。首次部署：复制 secrets_local.example.json
+# 为 secrets_local.json 并填入真实值。
+import json as _json
+
+_SECRETS_FILE = Path(__file__).parent / "secrets_local.json"
+try:
+    _secrets = _json.loads(_SECRETS_FILE.read_text(encoding="utf-8"))
+except FileNotFoundError:
+    raise RuntimeError(
+        f"找不到 {_SECRETS_FILE}。请复制 secrets_local.example.json 为 "
+        "secrets_local.json 并填入真实的 SharePoint/Azure AD 凭据"
+        "（client_id / client_secret / tenant_id）。"
+    )
+
 SP_SITE_URL = "https://pgone.sharepoint.com/sites/ChinaOlayinnovationCI"
 SP_UPLOAD_FOLDER = "Shared Documents/CI Hero SKU pic"   # 【确认上传目标文件夹名称】
-SP_CLIENT_ID = "ed61bbd2-1948-4bbe-9849-7efb34bf9181"
-SP_CLIENT_SECRET = "itI8Q~Vv8N5EPhr6HTc0vXcq08cPIkFTd-nbpbX3"
-SP_TENANT_ID = "3596192b-fdf5-4e2c-a6fa-acb706c963d8"
+SP_CLIENT_ID = _secrets["sp_client_id"]
+SP_CLIENT_SECRET = _secrets["sp_client_secret"]
+SP_TENANT_ID = _secrets["sp_tenant_id"]
 
 # ===== 邮件配置 =====
 EMAIL_FROM = "xie.x.3@pg.com"

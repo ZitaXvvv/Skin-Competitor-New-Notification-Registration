@@ -4,3 +4,7 @@ requests>=2.32.0
 msal>=1.29.0
 pywin32>=306
 pymupdf>=1.24.0
+streamlit>=1.35.0
+pandas>=2.2.0
+# 可选：本地免费滑块验证码识别，不装也能跑（会自动降级到超级鹰/人工）
+ddddocr>=1.5.0
