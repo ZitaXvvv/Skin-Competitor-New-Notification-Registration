@@ -10,8 +10,9 @@ _merge_uploads.py
   - 样稿链接 → col J（mini POC）；若是 NMPA PDF 则同时写 col H（link）
 """
 
+import shutil
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import openpyxl
@@ -23,13 +24,12 @@ TEMP   = Path(r"C:\Users\xie.x.3\AppData\Local\Temp\1")
 
 # 品牌文件名 → 目标 sheet 名
 BRAND_FILES = {
-    "百雀羚.xlsx":  "BQL",
-    "谷雨.xlsx":    "GUYU",
-    "韩束.xlsx":    "Kans",
-    "兰蔻.xlsx":    "Lancome",
-    "欧诗漫.xlsx":  "OSM",
-    "修丽可.xlsx":  "SKIN CEUTICALS",
-    "自然堂.xlsx":  "Chando",
+    "雅诗兰黛.xlsx":  "ESTEE LAUDER",
+    "薇诺娜.xlsx":    "Winona",
+    "珀莱雅.xlsx":    "PROYA",
+    "欧莱雅.xlsx":    "LOREAL",
+    "科颜氏.xlsx":    "Kiehls",
+    "娇韵诗.xlsx":    "Clains",
 }
 
 # CI_List_Ada.xlsx 里的 sheet → 目标 sheet 的映射（名字相同）
@@ -234,6 +234,14 @@ def merge_cilist_file(src: Path, dest_wb: openpyxl.Workbook):
 
 def main():
     print(f"目标文件: {DEST}")
+
+    # 0. 写入前自动备份，避免合并出错导致数据不可恢复
+    backup_dir = DEST.parent / "_admin_backups"
+    backup_dir.mkdir(exist_ok=True)
+    backup_path = backup_dir / f"{DEST.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    shutil.copy2(DEST, backup_path)
+    print(f"已备份到: {backup_path}")
+
     dest_wb = openpyxl.load_workbook(str(DEST))
 
     # 1. 合并品牌文件
