@@ -546,7 +546,7 @@ GLOBAL_CSS = """
     gap: 6px;
   }
 
-  /* 产品卡片（正方形，固定宽度，横向排列） */
+  /* 产品卡片：始终每行3张，宽度响应格子实际宽度 (gap=6px, 3列: (100%-2*6)/3) */
   .prod-card {
     background: white;
     border: 1px solid #e8ecf1;
@@ -555,9 +555,9 @@ GLOBAL_CSS = """
     box-sizing: border-box;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,.04);
-    flex: 0 0 110px;
-    width: 110px;
-    min-height: 110px;
+    flex: 0 0 calc((100% - 12px) / 3);
+    width: calc((100% - 12px) / 3);
+    min-height: 90px;
     display: flex;
     flex-direction: column;
   }
