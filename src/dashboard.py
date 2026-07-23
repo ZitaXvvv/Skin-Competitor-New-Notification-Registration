@@ -6,7 +6,11 @@ CI New SKU Dashboard — Streamlit 前端
     streamlit run src/dashboard.py
 """
 
+import base64
 import json
+import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +21,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent))
 from config import (
     BRANDS,
+    COL_CATEGORY,
     COL_DATE,
     COL_EFFECT,
     COL_INGREDIENTS,
@@ -28,7 +33,9 @@ from config import (
     COL_UPLOAD_DATE,
     DOWNLOAD_BASE,
     EXCEL_PATH,
+    LOG_DIR,
 )
+from auth import verify_login
 
 # ─────────────────────────────────────────────
 # 页面配置
@@ -41,6 +48,122 @@ st.set_page_config(
 )
 
 TRANSLATION_CACHE = Path(__file__).parent / "translations_cache.json"
+IMAGE_MAP_JSON    = Path(__file__).parent.parent / "res" / "product_images" / "image_map.json"
+
+
+@st.cache_resource
+def load_image_map() -> dict[str, dict[str, str]]:
+    """加载产品名→图片路径映射，并预先 base64 编码图片"""
+    if not IMAGE_MAP_JSON.exists():
+        return {}
+    raw: dict[str, dict[str, str]] = json.loads(IMAGE_MAP_JSON.read_text(encoding="utf-8"))
+    result: dict[str, dict[str, str]] = {}   # brand_en → {prod_name: data_uri}
+    for brand, mapping in raw.items():
+        result[brand] = {}
+        for name, path in mapping.items():
+            p = Path(path)
+            if p.exists():
+                try:
+                    mime = "image/jpeg" if p.suffix.lower() in (".jpg", ".jpeg") else "image/png"
+                    b64 = base64.b64encode(p.read_bytes()).decode()
+                    uri = f"data:{mime};base64,{b64}"
+                    # 拆分拼接名（如"名称A名称B"→分别存两份 uri）
+                    for part in _split_img_key(name):
+                        result[brand][part] = uri
+                except Exception:
+                    pass
+    return result
+
+
+# 品牌中文名列表（用于从 image key 中识别/剥离品牌前缀）
+_ZH_BRANDS = [
+    "珀莱雅","谷雨","欧诗漫","兰蔻","欧莱雅","雅诗兰黛",
+    "修丽可","百雀羚","韩束","自然堂","薇诺娜","妮维雅","资生堂","科颜氏","契尔氏",
+]
+
+def _split_img_key(name: str) -> list[str]:
+    """
+    把拼接的图片 key 拆开，并为每个子名生成带/不带品牌的变体。
+    例：'珀莱雅双抗焕亮清透水珀莱雅双抗焕白净亮清透水'
+      → ['珀莱雅双抗焕亮清透水', '双抗焕亮清透水',
+          '珀莱雅双抗焕白净亮清透水', '双抗焕白净亮清透水']
+    """
+    import re
+    parts = [name]
+    # 在已知品牌名前拆分（同一品牌出现两次 = 两个名字拼一起）
+    for zh in _ZH_BRANDS:
+        new_parts = []
+        for p in parts:
+            # 找第二次出现的品牌名，在那里切割
+            idx = p.find(zh, len(zh))  # 从品牌名长度后开始找
+            if idx > 0:
+                new_parts.append(p[:idx])
+                new_parts.append(p[idx:])
+            else:
+                new_parts.append(p)
+        parts = new_parts
+
+    result = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        result.append(p)
+        # 去品牌前缀的变体
+        for zh in _ZH_BRANDS:
+            if p.startswith(zh):
+                short = p[len(zh):]
+                if len(short) >= 4:
+                    result.append(short)
+                break
+    return list(dict.fromkeys(result))  # 保序去重
+
+
+def find_prod_img(brand_en: str, prod_name: str, img_map: dict) -> str:
+    """
+    在 img_map[brand_en] 中查找 prod_name 对应的图片 URI。
+    顺序：精确 → 去品牌前缀 → 图片key是产品名子串 → 产品名是图片key子串
+    """
+    brand_imgs = img_map.get(brand_en, {})
+    if not brand_imgs:
+        return ""
+
+    # 1. 精确匹配
+    if prod_name in brand_imgs:
+        return brand_imgs[prod_name]
+
+    # 2. 去品牌前缀后精确匹配
+    short_name = prod_name
+    for zh in _ZH_BRANDS:
+        if prod_name.startswith(zh):
+            short_name = prod_name[len(zh):]
+            break
+    if short_name != prod_name and short_name in brand_imgs:
+        return brand_imgs[short_name]
+
+    # 3. 图片 key（或其去品牌版）是产品名的子串（最长优先）
+    candidates = []
+    for img_key, uri in brand_imgs.items():
+        # img_key 去品牌前缀
+        img_short = img_key
+        for zh in _ZH_BRANDS:
+            if img_key.startswith(zh):
+                img_short = img_key[len(zh):]
+                break
+        # 用去品牌的短名做子串匹配
+        if len(img_short) >= 4 and img_short in prod_name:
+            candidates.append((len(img_short), uri))
+        elif len(img_short) >= 4 and img_short in short_name:
+            candidates.append((len(img_short), uri))
+        # 反向：产品名去品牌后是图片key的子串
+        elif len(short_name) >= 4 and short_name in img_short:
+            candidates.append((len(short_name), uri))
+
+    if candidates:
+        candidates.sort(key=lambda x: -x[0])  # 最长匹配优先
+        return candidates[0][1]
+
+    return ""
 
 # ─────────────────────────────────────────────
 # 本地翻译：美妆专用词典（零网络依赖）
@@ -157,6 +280,11 @@ _REG_PAT_GLOBAL = _re_global.compile(
     r"(妆网备字|国妆备字|国妆特字|国妆特进字|国妆备进字|卫妆特字)"
 )
 
+# 前端不展示：唇部类产品 & 男士类产品
+_EXCLUDE_NAME_PAT = _re_global.compile(
+    r"唇釉|唇膏|唇彩|唇线笔|口红|润唇|唇部|男士|男仕"
+)
+
 
 def _excel_files_to_load() -> list[Path]:
     """返回所有 CI_List_Ada*.xlsx 路径，当前文件排最后（优先级最高）"""
@@ -197,7 +325,7 @@ def _load_one_excel(path: Path, seen_regs: set, records: list):
         if brand_en not in wb.sheetnames:
             continue
         ws = wb[brand_en]
-        for row in ws.iter_rows(min_row=2, values_only=True):
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
             if not row or len(row) < 5:
                 continue
 
@@ -214,6 +342,10 @@ def _load_one_excel(path: Path, seen_regs: set, records: list):
             poc_raw    = g(COL_POC_URL)
 
             if not name_raw:
+                continue
+
+            # 排除唇部/男士类产品，不在前端展示
+            if _EXCLUDE_NAME_PAT.search(str(name_raw)):
                 continue
 
             notif_date = _parse_notif_date(notif_raw, upload_raw)
@@ -260,6 +392,8 @@ def _load_one_excel(path: Path, seen_regs: set, records: list):
                 "label_url":   clean(label_raw),
                 "poc_url":     clean(poc_raw),
                 "source_file": path.name,
+                "editable":    (path == Path(EXCEL_PATH)),
+                "row_idx":     row_idx,
             })
     wb.close()
 
@@ -340,7 +474,7 @@ GLOBAL_CSS = """
   /* ── 日历表格 ── */
   .cal-wrap { overflow-x: auto; border-radius: 12px;
               box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-  .cal-table { border-collapse: collapse; width: 100%; min-width: 1100px;
+  .cal-table { border-collapse: collapse; width: 100%; min-width: 1700px;
                font-size: 12px; background: white; }
 
   /* 表头 */
@@ -389,19 +523,21 @@ GLOBAL_CSS = """
     border: 1px solid #f0f2f5;
     padding: 6px;
     vertical-align: top;
-    min-width: 200px;
+    width: 416px;
     background: white;
   }
   .cal-cell:hover { background: #fafbff; }
 
-  /* 每格3列网格 */
+  /* 每格：3 张卡片一行，超出自动换行到下一行 */
   .cell-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 4px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 402px;
+    gap: 6px;
   }
 
-  /* 产品卡片（默认折叠，点击展开） */
+  /* 产品卡片（正方形，固定宽度，横向排列） */
   .prod-card {
     background: white;
     border: 1px solid #e8ecf1;
@@ -410,9 +546,42 @@ GLOBAL_CSS = """
     box-sizing: border-box;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    flex: 0 0 130px;
+    width: 130px;
+    min-height: 130px;
+    display: flex;
+    flex-direction: column;
   }
   .prod-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.10); }
   .prod-card.special { border-top-color: #c62828; }
+
+  /* 产品图片 */
+  .prod-img-wrap {
+    width: 100%;
+    aspect-ratio: 1;
+    overflow: hidden;
+    background: #f8f9fb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .prod-img-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .prod-img-placeholder {
+    width: 100%;
+    aspect-ratio: 1;
+    background: #f4f6f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #cdd5df;
+    flex-shrink: 0;
+  }
+  .prod-img-placeholder svg { width: 30%; height: 30%; }
 
   /* <details> 折叠 */
   .prod-card details { margin: 0; }
@@ -479,69 +648,58 @@ GLOBAL_CSS = """
 """
 
 
-def product_card_html(prod: dict, en_name: str) -> str:
+def product_card_html(prod: dict, en_name: str, img_uri: str = "") -> str:
     is_special = prod["reg_type"] == "特殊注册"
     badge = (f'<span class="badge badge-s">特殊</span>'
              if is_special else f'<span class="badge badge-n">备案</span>')
-    eff   = (prod["effect"][:60] + "…") if len(prod["effect"]) > 60 else prod["effect"]
-    ingr  = prod.get("ingredients", "") or ""
-    ingr_s = (ingr[:120] + "…") if len(ingr) > 120 else ingr
 
-    btns = ""
-    if prod["pdf_url"]:
-        btns += f'<a href="{prod["pdf_url"]}" target="_blank" class="btn btn-art">🖼 Artwork</a>'
-    if prod["label_url"]:
-        btns += f'<a href="{prod["label_url"]}" target="_blank" class="btn btn-lbl">🏷 Label</a>'
-    if prod["poc_url"]:
-        btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn btn-poc">🧪 POC</a>'
-
-    import re as _re2
-    # 英文翻译显示在 summary（折叠时可见）：仅当翻译结果与原名不同且包含>=3字母的英文词
-    en_shown = ""
-    if en_name and en_name != prod["name"] and _re2.search(r"[A-Za-z]{3,}", en_name):
-        en_shown = f'<div class="prod-en" style="margin:1px 0 2px">{en_name[:50]}</div>'
-
-    eff_block  = f'<div class="prod-eff">{eff}</div>'  if eff else ""
-    ingr_block = f'<div class="prod-ingr">{ingr_s}</div>' if ingr_s else ""
+    # 图片区域
+    if img_uri:
+        img_block = f'<div class="prod-img-wrap"><img src="{img_uri}" alt=""></div>'
+    else:
+        img_block = ('<div class="prod-img-placeholder">'
+                     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">'
+                     '<path d="M9 2h6M10 2v3.2c0 .3-.1.6-.3.8L7.6 8.7c-.4.4-.6 1-.6 1.6V20a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-9.7c0-.6-.2-1.2-.6-1.6l-2.1-2.7a1.3 1.3 0 0 1-.3-.8V2" '
+                     'stroke-linecap="round" stroke-linejoin="round"/></svg></div>')
 
     card_cls = "prod-card special" if is_special else "prod-card"
-    name_disp = prod["name"][:32]
+    name_disp = prod["name"][:28]
     pid = prod.get("_pid", "")
     drag_attrs = (f'draggable="true" data-pid="{pid}" ondragstart="cmpDragStart(event)"'
                   if pid else "")
-    # Artwork/POC 按钮始终可见（放在 <details> 外部，卡片底部）
-    always_btns = ""
+
+    # Artwork/POC 按钮
+    btns = ""
     if prod["pdf_url"]:
-        always_btns += f'<a href="{prod["pdf_url"]}" target="_blank" class="btn btn-art" title="NMPA PDF（公司内网可能需用下方下载区）">&#x1F5BC; Artwork</a>'
+        btns += f'<a href="{prod["pdf_url"]}" target="_blank" class="btn btn-art" title="NMPA PDF">&#x1F5BC;</a>'
     if prod["label_url"]:
-        always_btns += f'<a href="{prod["label_url"]}" target="_blank" class="btn btn-lbl">&#x1F3F7; Label</a>'
+        btns += f'<a href="{prod["label_url"]}" target="_blank" class="btn btn-lbl" title="Label">&#x1F3F7;</a>'
     if prod["poc_url"]:
-        always_btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn btn-poc" title="NMPA 产品详情页（需能访问 NMPA 外网）">&#x1F9EA; POC</a>'
-    always_btn_block = f'<div class="btn-row" style="padding:4px 8px 6px">{always_btns}</div>' if always_btns else ""
+        btns += f'<a href="{prod["poc_url"]}" target="_blank" class="btn btn-poc" title="NMPA \u4ea7\u54c1\u8be6\u60c5">&#x1F9EA;</a>'
+    btn_block = f'<div class="btn-row" style="padding:3px 5px 4px;flex-wrap:wrap">{btns}</div>' if btns else ""
+
     return f"""<div class="{card_cls}" {drag_attrs}>
-  <details>
-    <summary>
-      <div class="sum-row">
-        <span class="prod-name">{name_disp}</span>
-        <span class="expand-hint"></span>
-      </div>
-      {en_shown}
-      {badge}
-    </summary>
-    <div class="prod-body">
-      {eff_block}{ingr_block}
-    </div>
-  </details>
-  {always_btn_block}
+  {img_block}
+  <div style="padding:5px 6px 0">
+    <div class="prod-name" style="font-size:10px;line-height:1.3">{name_disp}</div>
+    <div style="margin-top:3px">{badge}</div>
+  </div>
+  {btn_block}
 </div>"""
 
 
-def build_calendar_html(records, selected_brands, months, trans_cache) -> str:
+def _quarter_key(year: int, month: int) -> str:
+    q = (month - 1) // 3 + 1
+    return f"{year}-Q{q}"
+
+
+def build_calendar_html(records, selected_brands, months, trans_cache, img_map) -> str:
     grouped: dict[str, dict[str, list]] = {}
     for r in records:
         if r["brand_en"] not in selected_brands:
             continue
-        grouped.setdefault(r["brand_en"], {}).setdefault(r["year_month"], []).append(r)
+        qk = _quarter_key(r["year"], r["month"])
+        grouped.setdefault(r["brand_en"], {}).setdefault(qk, []).append(r)
 
     if not grouped:
         return "<p style='color:#888;padding:20px'>当前筛选条件下无数据</p>"
@@ -559,13 +717,15 @@ def build_calendar_html(records, selected_brands, months, trans_cache) -> str:
         if not brand_data:
             continue
         brand_cn = BRANDS[brand_en]
+        brand_imgs = img_map.get(brand_en, {})
         html += f'<tr><td class="cal-brand">{brand_en}<small>{brand_cn}</small></td>'
         for ym, _ in months:
             prods = brand_data.get(ym, [])
             html += '<td class="cal-cell"><div class="cell-grid">'
             for p in prods:
                 en = trans_cache.get(p["name"], "")
-                html += product_card_html(p, en)
+                img_uri = find_prod_img(brand_en, p["name"], img_map)
+                html += product_card_html(p, en, img_uri)
             html += "</div></td>"
         html += "</tr>"
 
@@ -1049,6 +1209,246 @@ def _render_pdf_download_section(records: list[dict]):
 
 
 # ─────────────────────────────────────────────
+# 管理模式：登录 / 触发抓取 / 增删改 + 操作日志
+# ─────────────────────────────────────────────
+ADMIN_LOG_FILE = LOG_DIR / "admin_actions.log"
+PIPELINE_LOCK  = LOG_DIR / "pipeline.lock"
+
+_EDITABLE_COLS = [
+    ("upload_date", COL_UPLOAD_DATE, "上传日期 (MM/DD/YYYY)"),
+    ("name",        COL_NAME,        "产品名称"),
+    ("effect",      COL_EFFECT,      "功效宣称"),
+    ("notif_date",  COL_DATE,        "备案/通知日期"),
+    ("reg_num",     COL_REG_NUM,     "备案/注册号"),
+    ("category",    COL_CATEGORY,    "类目/其他"),
+    ("ingredients", COL_INGREDIENTS, "成分列表"),
+    ("pdf_url",     COL_PDF_URL,     "PDF链接"),
+    ("label_url",   COL_LABEL_URL,   "标签链接(Artwork)"),
+    ("poc_url",     COL_POC_URL,     "mini POC链接"),
+]
+
+
+def log_admin_action(username: str, action: str, brand: str, detail: dict):
+    ADMIN_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user": username, "action": action, "brand": brand, "detail": detail,
+    }
+    with open(ADMIN_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def is_pipeline_running() -> bool:
+    return PIPELINE_LOCK.exists()
+
+
+def trigger_pipeline(days: int = 28):
+    """后台（非阻塞）启动一次完整抓取流程，跑完后自动清理锁文件"""
+    PIPELINE_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    PIPELINE_LOCK.write_text(datetime.now().isoformat(), encoding="utf-8")
+    main_py = Path(__file__).parent / "main.py"
+    python_exe = sys.executable
+    if os.name == "nt":
+        cmd = f'"{python_exe}" "{main_py}" --days {days} & del /f /q "{PIPELINE_LOCK}"'
+        subprocess.Popen(["cmd", "/c", cmd], cwd=str(main_py.parent),
+                          creationflags=subprocess.CREATE_NO_WINDOW)
+    else:
+        cmd = f'"{python_exe}" "{main_py}" --days {days}; rm -f "{PIPELINE_LOCK}"'
+        subprocess.Popen(["/bin/sh", "-c", cmd], cwd=str(main_py.parent))
+
+
+def get_last_run_info():
+    if not LOG_DIR.exists():
+        return None
+    logs = sorted(LOG_DIR.glob("ci_bot_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not logs:
+        return None
+    latest = logs[0]
+    try:
+        tail = latest.read_text(encoding="utf-8", errors="ignore").splitlines()[-15:]
+    except Exception:
+        tail = []
+    ok = any(("✅" in l and ("邮件" in l or "完成" in l)) for l in tail)
+    return {
+        "file": latest.name,
+        "mtime": datetime.fromtimestamp(latest.stat().st_mtime),
+        "tail": tail,
+        "ok": ok,
+    }
+
+
+def render_login_box():
+    """侧边栏：管理员登录 / 已登录状态显示"""
+    with st.sidebar:
+        st.markdown("### 🔒 管理模式")
+        if st.session_state.get("is_admin"):
+            st.success(f"已登录：{st.session_state.get('admin_user')}")
+            if st.button("退出登录"):
+                st.session_state["is_admin"] = False
+                st.session_state["admin_user"] = None
+                st.rerun()
+        else:
+            with st.form("admin_login_form", clear_on_submit=True):
+                u = st.text_input("用户名")
+                p = st.text_input("密码", type="password")
+                submitted = st.form_submit_button("登录")
+                if submitted:
+                    if verify_login(u, p):
+                        st.session_state["is_admin"] = True
+                        st.session_state["admin_user"] = u
+                        st.rerun()
+                    else:
+                        st.error("用户名或密码错误")
+
+
+def render_admin_panel(records: list[dict]):
+    """管理员面板：触发抓取 + 逐行增/删/改（仅作用于当前 EXCEL_PATH 文件）"""
+    username = st.session_state.get("admin_user", "unknown")
+
+    with st.expander("🛠️ 管理面板", expanded=False):
+        # ── 抓取状态 & 手动触发 ──
+        st.markdown("#### 📡 抓取任务")
+        info = get_last_run_info()
+        if info:
+            status_icon = "✅" if info["ok"] else "⚠️"
+            st.caption(f"{status_icon} 最近一次日志：{info['file']}（{info['mtime'].strftime('%Y-%m-%d %H:%M:%S')}）")
+            with st.expander("查看最近日志尾部"):
+                st.code("\n".join(info["tail"]))
+        else:
+            st.caption("暂无历史抓取日志")
+
+        if is_pipeline_running():
+            st.info("⏳ 有一次抓取任务正在后台运行中，请稍后刷新查看结果")
+        else:
+            days = st.number_input("查询天数", min_value=1, max_value=730, value=28, step=1)
+            if st.button("🚀 立即触发一次全量抓取（后台运行，不会卡住页面）"):
+                trigger_pipeline(days=int(days))
+                log_admin_action(username, "trigger_pipeline", "-", {"days": int(days)})
+                st.success("已在后台启动，可稍后刷新本页查看'最近一次日志'确认结果")
+                st.rerun()
+
+        st.divider()
+
+        # ── 逐行增 / 删 / 改（仅当前 EXCEL_PATH 文件可编辑） ──
+        st.markdown("#### ✏️ 数据增/删/改（仅影响当前主文件，历史归档只读）")
+        editable_brands = sorted({r["brand_en"] for r in records if r.get("editable")})
+        if not editable_brands:
+            st.caption("当前主文件里没有可编辑的品牌数据")
+            return
+
+        brand_en = st.selectbox("选择品牌", editable_brands,
+                                 format_func=lambda k: f"{k} / {BRANDS.get(k, '')}")
+        brand_rows = sorted(
+            [r for r in records if r.get("editable") and r["brand_en"] == brand_en],
+            key=lambda r: r["row_idx"],
+        )
+
+        import pandas as pd
+        preview_df = pd.DataFrame([
+            {"行号": r["row_idx"], "产品名称": r["name"], "备案/通知日期": str(r["notif_date"]),
+             "备案/注册号": r["reg_num"]}
+            for r in brand_rows
+        ])
+        st.dataframe(preview_df, use_container_width=True, height=250)
+
+        action = st.radio("操作", ["编辑已有行", "删除已有行", "新增一行"], horizontal=True)
+
+        if action in ("编辑已有行", "删除已有行") and brand_rows:
+            row_options = {r["row_idx"]: f"行{r['row_idx']} · {r['name']}" for r in brand_rows}
+            sel_row_idx = st.selectbox("选择行", list(row_options.keys()),
+                                        format_func=lambda i: row_options[i])
+            sel_row = next(r for r in brand_rows if r["row_idx"] == sel_row_idx)
+
+            if action == "编辑已有行":
+                with st.form(f"edit_form_{brand_en}_{sel_row_idx}"):
+                    new_vals = {}
+                    for key, _col, label in _EDITABLE_COLS:
+                        new_vals[key] = st.text_input(label, value=str(sel_row.get(key, "") or ""))
+                    confirm = st.checkbox("✅ 确认保存以上修改")
+                    if st.form_submit_button("保存修改") and confirm:
+                        _write_row(EXCEL_PATH, brand_en, sel_row_idx, new_vals)
+                        log_admin_action(username, "edit_row", brand_en,
+                                          {"row_idx": sel_row_idx, "before": {k: sel_row.get(k) for k, *_ in _EDITABLE_COLS},
+                                           "after": new_vals})
+                        st.cache_data.clear()
+                        st.success(f"已保存第 {sel_row_idx} 行的修改")
+                        st.rerun()
+
+            elif action == "删除已有行":
+                st.warning(f"即将删除：行{sel_row_idx} · {sel_row['name']}（{sel_row['reg_num']}）")
+                confirm_del = st.checkbox("✅ 我确认要删除这一行（不可撤销，请谨慎操作）")
+                if st.button("🗑 确认删除此行", disabled=not confirm_del):
+                    _delete_row(EXCEL_PATH, brand_en, sel_row_idx)
+                    log_admin_action(username, "delete_row", brand_en,
+                                      {"row_idx": sel_row_idx, "deleted": {k: sel_row.get(k) for k, *_ in _EDITABLE_COLS}})
+                    st.cache_data.clear()
+                    st.success(f"已删除第 {sel_row_idx} 行")
+                    st.rerun()
+
+        elif action == "新增一行":
+            with st.form(f"add_form_{brand_en}"):
+                new_vals = {}
+                for key, _col, label in _EDITABLE_COLS:
+                    default = datetime.now().strftime("%m/%d/%Y") if key == "upload_date" else ""
+                    new_vals[key] = st.text_input(label, value=default)
+                confirm_add = st.checkbox("✅ 确认新增这一行")
+                if st.form_submit_button("新增") and confirm_add:
+                    new_row_idx = _append_row(EXCEL_PATH, brand_en, new_vals)
+                    log_admin_action(username, "add_row", brand_en, {"row_idx": new_row_idx, "values": new_vals})
+                    st.cache_data.clear()
+                    st.success(f"已新增第 {new_row_idx} 行")
+                    st.rerun()
+
+
+def _backup_excel(path, keep_last: int = 30) -> Path:
+    """写入前自动备份 Excel，供 _write_row/_delete_row/_append_row 共用。
+    误删/误改可从 <文件所在目录>/_admin_backups/ 里恢复最近的一份。
+    只保留最近 keep_last 份，避免频繁编辑时备份无限堆积。"""
+    src = Path(path)
+    backup_dir = src.parent / "_admin_backups"
+    backup_dir.mkdir(exist_ok=True)
+    backup_path = backup_dir / f"{src.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    shutil.copy2(src, backup_path)
+
+    old_backups = sorted(backup_dir.glob(f"{src.stem}_backup_*.xlsx"), key=lambda p: p.stat().st_mtime)
+    for stale in old_backups[:-keep_last]:
+        stale.unlink(missing_ok=True)
+
+    return backup_path
+
+
+def _write_row(path, brand_en: str, row_idx: int, vals: dict):
+    _backup_excel(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[brand_en]
+    for key, col, _label in _EDITABLE_COLS:
+        ws.cell(row=row_idx, column=col, value=vals.get(key, ""))
+    wb.save(path)
+    wb.close()
+
+
+def _delete_row(path, brand_en: str, row_idx: int):
+    _backup_excel(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[brand_en]
+    ws.delete_rows(row_idx, 1)
+    wb.save(path)
+    wb.close()
+
+
+def _append_row(path, brand_en: str, vals: dict) -> int:
+    _backup_excel(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[brand_en]
+    new_row_idx = ws.max_row + 1
+    for key, col, _label in _EDITABLE_COLS:
+        ws.cell(row=new_row_idx, column=col, value=vals.get(key, ""))
+    wb.save(path)
+    wb.close()
+    return new_row_idx
+
+
+# ─────────────────────────────────────────────
 # 主界面
 # ─────────────────────────────────────────────
 def main():
@@ -1061,10 +1461,17 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    render_login_box()
+
     records = load_data()
     if not records:
         st.error("⚠️ 未读到数据，请先运行：`python src/main.py --days 730`")
         st.stop()
+
+    if st.session_state.get("is_admin"):
+        render_admin_panel(records)
+
+    img_map = load_image_map()
 
     all_brand_keys = list(BRANDS.keys())
     all_years = sorted({r["year"] for r in records}, reverse=True)
@@ -1146,16 +1553,15 @@ def main():
     for i, r in enumerate(filtered):
         r["_pid"] = f"p{i}"
 
-    month_labels = ["Jan","Feb","Mar","Apr","May","Jun",
-                    "Jul","Aug","Sep","Oct","Nov","Dec"]
+    quarter_labels = [("Q1", "JFM"), ("Q2", "AMJ"), ("Q3", "JAS"), ("Q4", "OND")]
 
     year_sections = ""
     for yr in sorted(selected_years, reverse=True):
         yr_filtered = [r for r in filtered if r["year"] == yr]
         if not yr_filtered:
             continue
-        months = [(f"{yr}-{m:02d}", month_labels[m-1]) for m in range(1, 13)]
-        cal_html = build_calendar_html(yr_filtered, selected_brands, months, trans_cache)
+        months = [(f"{yr}-{qk}", label) for qk, label in quarter_labels]
+        cal_html = build_calendar_html(yr_filtered, selected_brands, months, trans_cache, img_map)
         year_sections += f"""
         <h3 style="color:#1a2b4a;margin:18px 0 6px;font-family:'Inter',sans-serif">📅 {yr}</h3>
         {cal_html}"""
@@ -1174,23 +1580,19 @@ def main():
     # 固定高度 + 内部滚动条：悬浮按钮/抽屉的 position:fixed 是相对这个
     # iframe 自身可视区域的，只有高度固定、内容用内部滚动条滚动，才能让
     # 悬浮层在"滚动年份/品牌"时始终保持可见。
-    FRAME_HEIGHT = 820
+    FRAME_HEIGHT = 900
     st.iframe(full_html, height=FRAME_HEIGHT)
 
     # ── PDF 本地下载区（公司网络内 NMPA 外部链接可能无法打开，优先用此）──
     _render_pdf_download_section(filtered)
 
-    # ── 数据下载 ──
-    with st.expander("📊 原始数据 / 下载 CSV"):
+    # ── 原始数据 ──
+    with st.expander("📊 原始数据"):
         import pandas as pd
-        df = pd.DataFrame(filtered).drop(columns=["year", "month", "source_file", "_pid"],
+        df = pd.DataFrame(filtered).drop(columns=["year", "month", "source_file", "_pid",
+                                                  "editable", "row_idx"],
                                          errors="ignore")
         st.dataframe(df, use_container_width=True)
-        st.download_button(
-            "⬇️ 下载 CSV",
-            df.to_csv(index=False, encoding="utf-8-sig"),
-            file_name="ci_newsku.csv", mime="text/csv"
-        )
 
 
 if __name__ == "__main__":

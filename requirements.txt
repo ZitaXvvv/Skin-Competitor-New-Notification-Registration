@@ -3,3 +3,4 @@ openpyxl>=3.1.2
 requests>=2.32.0
 msal>=1.29.0
 pywin32>=306
+pymupdf>=1.24.0
