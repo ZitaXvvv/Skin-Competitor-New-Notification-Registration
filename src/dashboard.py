@@ -472,9 +472,9 @@ GLOBAL_CSS = """
   .stat-card.red   .value { color: #c62828; }
 
   /* ── 日历表格 ── */
-  .cal-wrap { overflow-x: auto; border-radius: 12px;
+  .cal-wrap { border-radius: 12px;
               box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-  .cal-table { border-collapse: collapse; width: 100%; min-width: 1700px;
+  .cal-table { border-collapse: collapse; width: 100%; table-layout: fixed;
                font-size: 12px; background: white; }
 
   /* 表头 */
@@ -487,6 +487,8 @@ GLOBAL_CSS = """
     font-size: 11px;
     letter-spacing: .4px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .cal-th-brand {
     background: #1a2b4a;
@@ -495,7 +497,7 @@ GLOBAL_CSS = """
     font-weight: 600;
     font-size: 11px;
     text-align: left;
-    min-width: 100px;
+    width: 88px;
     position: sticky;
     left: 0;
     z-index: 2;
@@ -510,7 +512,7 @@ GLOBAL_CSS = """
     font-size: 12px;
     color: #1a2b4a;
     vertical-align: top;
-    min-width: 100px;
+    width: 88px;
     position: sticky;
     left: 0;
     z-index: 1;
@@ -523,17 +525,17 @@ GLOBAL_CSS = """
     border: 1px solid #f0f2f5;
     padding: 6px;
     vertical-align: top;
-    width: 416px;
     background: white;
+    overflow: hidden;
   }
   .cal-cell:hover { background: #fafbff; }
 
-  /* 每格：3 张卡片一行，超出自动换行到下一行 */
+  /* 每格：卡片自适应换行——不再固定宽度，根据实际格子宽度自动排列，避免整个表格溢出需要横向拖动 */
   .cell-grid {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
-    width: 402px;
+    width: 100%;
     gap: 6px;
   }
 
@@ -546,9 +548,9 @@ GLOBAL_CSS = """
     box-sizing: border-box;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,.04);
-    flex: 0 0 130px;
-    width: 130px;
-    min-height: 130px;
+    flex: 0 0 110px;
+    width: 110px;
+    min-height: 110px;
     display: flex;
     flex-direction: column;
   }
