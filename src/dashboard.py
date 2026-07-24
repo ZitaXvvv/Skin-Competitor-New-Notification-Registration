@@ -78,7 +78,7 @@ def load_image_map() -> dict[str, dict[str, str]]:
 # 品牌中文名列表（用于从 image key 中识别/剥离品牌前缀）
 _ZH_BRANDS = [
     "珀莱雅","谷雨","欧诗漫","兰蔻","欧莱雅","雅诗兰黛",
-    "修丽可","百雀羚","韩束","自然堂","薇诺娜","妮维雅","资生堂","科颜氏","契尔氏",
+    "修丽可","百雀羚","韩束","自然堂","薇诺娜","科颜氏","契尔氏",
 ]
 
 def _split_img_key(name: str) -> list[str]:
@@ -280,10 +280,10 @@ _REG_PAT_GLOBAL = _re_global.compile(
     r"(妆网备字|国妆备字|国妆特字|国妆特进字|国妆备进字|卫妆特字)"
 )
 
-# 前端不展示：唇部类产品 & 男士类产品
+# 前端不展示：唇部类产品 & 男士类产品 & 契尔氏（搜科颜氏时的串台结果）
 # 名称关键词：含"唇"字的都排除（涵盖唇油/唇蜜/唇露/唇膏/唇彩/唇釉/润唇等）
 _EXCLUDE_NAME_PAT = _re_global.compile(
-    r"唇|口红|男士|男仕"
+    r"唇|口红|男士|男仕|契尔氏|名女人"
 )
 # 类目关键词：category 列含"唇"字也排除
 _EXCLUDE_CAT_PAT = _re_global.compile(r"唇")
@@ -477,6 +477,7 @@ GLOBAL_CSS = """
   .stat-card.blue  .value { color: #1565c0; }
   .stat-card.green .value { color: #2e7d32; }
   .stat-card.red   .value { color: #c62828; }
+  .stat-card .note { font-size: 10px; color: #8898aa; margin-top: 6px; line-height: 1.4; }
 
   /* ── 日历表格 ── */
   .cal-wrap { border-radius: 12px;
@@ -672,7 +673,7 @@ def product_card_html(prod: dict, en_name: str, img_uri: str = "") -> str:
                      'stroke-linecap="round" stroke-linejoin="round"/></svg></div>')
 
     card_cls = "prod-card special" if is_special else "prod-card"
-    name_disp = prod["name"][:28]
+    name_disp = (en_name[:32] if en_name else prod["name"][:28])
     pid = prod.get("_pid", "")
     drag_attrs = (f'draggable="true" data-pid="{pid}" ondragstart="cmpDragStart(event)"'
                   if pid else "")
@@ -1575,7 +1576,7 @@ def main():
     <div class="stat-row">
       <div class="stat-card blue"><div class="label">Total Products</div><div class="value">{total}</div></div>
       <div class="stat-card green"><div class="label">🟢 普通备案</div><div class="value">{normal}</div></div>
-      <div class="stat-card red"><div class="label">🔴 特殊注册</div><div class="value">{special}</div></div>
+      <div class="stat-card red"><div class="label">🔴 特殊注册</div><div class="value">{special}</div><div class="note">特殊化妆品在注册提交时不需要提交artwork，所以只有标签样稿</div></div>
       <div class="stat-card"><div class="label">Active Brands</div><div class="value">{brands_n}</div></div>
     </div>
     """, unsafe_allow_html=True)

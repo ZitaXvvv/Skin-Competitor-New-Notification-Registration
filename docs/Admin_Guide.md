@@ -10,25 +10,113 @@
 - 抓取流程：`src/main.py`，每月由 Windows 计划任务自动触发一次（见第2节）。
 - 管理员登录后（看板左侧栏"🔒 管理模式"），会出现"🛠️ 管理面板"，可以手动触发抓取、查看上次运行状态、增/删/改单行数据。
 
-## 2. 每月自动运行怎么配置 / 怎么检查
+# CI New SKU Tracker — 管理员操作手册
 
-- 一次性设置（新服务器/首次部署时执行）：以管理员身份打开 PowerShell，`cd` 到项目根目录，运行：
-  ```powershell
-  .\scripts\setup_monthly_task.ps1
-  ```
-  默认注册计划任务 `CI_NewSKU_Monthly_Scrape`：每月1号凌晨2点自动执行 `python src\main.py --days 31`。
-- 检查/手动测试：打开"任务计划程序"(`taskschd.msc`)，找到该任务，右键"运行"可以立即手动触发一次，用于验证配置是否正确。
+> 面向：负责服务器日常运维、数据纠错、账号管理的管理员。
+> 技术栈/架构设计请见附件 [Architecture.md](Architecture.md)。
+
+## 1. 系统总览
+
+- 看板前端：`streamlit run src/dashboard.py`，默认监听 `8501` 端口，普通用户直接访问、无需登录。
+- 数据源：`Documents\Olay CI\CI_List_Ada.xlsx`（每个品牌一个sheet），看板和抓取脚本读写的是同一份文件。
+- 抓取流程：`src/main.py`，每月由 Windows 计划任务自动触发一次（见第2节）。
+- **每日补全流程**：`src/module6_daily_fill.py`，每天凌晨3点自动补全10个不完整产品卡片（见第2.1节）。
+- 管理员登录后（看板左侧栏"🔒 管理模式"），会出现"🛠️ 管理面板"，可以手动触发抓取、查看上次运行状态、增/删/改单行数据。
+
+## 2. 计划任务配置（服务器首次部署必做）
+
+### 2.0 一键注册所有计划任务（推荐）
+
+以管理员身份打开 PowerShell，`cd` 到项目根目录，运行：
+
+```powershell
+.\scripts\setup_daily_fill_task.ps1
+```
+
+此脚本会同时注册以下两个任务：
+
+| 任务名 | 触发时间 | 执行内容 |
+|---|---|---|
+| `CI_NewSKU_Monthly_Scrape` | 每月1号 02:00 | 全量抓取过去40天新品（`main.py --days 40`） |
+| `CI_NewSKU_Daily_Fill` | 每天 03:00 | 增量补全10个不完整产品卡片（`module6_daily_fill.py`） |
+
+注册后可在"任务计划程序"(`taskschd.msc`)查看和手动触发。
+
+### 2.1 每日增量补全任务详解
+
+**目标**：对所有历史年份的产品，以每天10个的速度补全缺失的产品卡片信息，优先顺序 2026→2025→2024。
+
+**产品卡片完整定义**（以下任一缺失则该产品列为待补全）：
+- 产品名称（通常抓取时已有）
+- 备案号/注册号（通常抓取时已有）
+- **成分列表**（`Ingredient` 列）
+- **备案/注册 PDF 链接**（`link` 列）
+- **产品图片**（`image_map.json` 中有记录）
+- **mini-POC 链接**（`mini POC` 列，即 NMPA 产品详情页）
+
+**每日任务执行顺序**：
+1. 检查美丽修行（BEBD）Cookie 是否有效，记录到日志
+2. 检查 NMPA hzpba 网站是否可访问，记录到日志
+3. 扫描全部历史 Excel，找出不完整产品，按 2026→2025→2024 排序
+4. 取前10个，逐一执行：
+   a. 如有本地 PDF → 渲染首页为产品图（无需网络）
+   b. 如是特殊注册 PDF（文字型）→ 提取全成分列表
+   c. 如 BEBD/NMPA 可访问且缺少 PDF 链接 → 在线查询并写回 Excel
+   d. 新查到 PDF 链接后自动下载 + 渲染产品图
+5. **每7天运行一次历史月份补全**：
+   - 扫描全部 Excel 中各月实际数据量，识别零数据月份
+   - 对最近的缺失月份，自动计算所需 `--days` 参数并调用 `main.py` 补全
+   - 一次补一个月，进度保存在 `log/backfill_state.json`
+   - 若 BEBD 未登录则警告但不阻止执行，会以无登录状态尽力抓取
+6. 写入日志 `log/daily_fill_YYYYMMDD.log`
+
+**手动操作命令**：
+```powershell
+# 只检查连通性，不补全
+python src\module6_daily_fill.py --check
+
+# 预览会补全哪些产品和缺失月份（不实际写入）
+python src\module6_daily_fill.py --dry-run
+
+# 正常运行，每次10个 + 每7天一次历史月份补全
+python src\module6_daily_fill.py
+
+# 立即强制运行历史月份补全（不等7天间隔）
+python src\module6_daily_fill.py --backfill
+
+# 自定义每次处理数量
+python src\module6_daily_fill.py --limit 20
+```
+
+### 2.2 每月全量抓取怎么检查
+- 每月任务执行 `python src\main.py --days 40`（回溯40天，略多于一个月以防遗漏）。
+- 检查/手动测试：`taskschd.msc` → 找到 `CI_NewSKU_Monthly_Scrape` → 右键"运行"。
 - 也可以在看板"🛠️ 管理面板 → 📡 抓取任务"里直接点击"🚀 立即触发一次全量抓取"手动补跑（会显示上次运行的日志摘要和状态 ✅/❌）。
 
 ## 3. 什么时候需要登录什么网站（人工介入点）
 
 这是最容易被忽略、也最容易导致自动化"卡住"的部分，请重点关注：
 
-### 3.1 美丽修行 BEBD（bebd.bevol.com）— ⚠️ 需要人工登录
-- `module1_bebd.py` 用 Playwright 打开一个**可见**的浏览器窗口访问 bebd.bevol.com。
-- **首次部署，或者登录 Cookie 过期时**，脚本会在终端打印提示并暂停，等待人工在弹出的浏览器窗口里用账号密码或扫码完成登录，然后回到终端按 Enter，脚本才会继续（登录状态会存入 `src/bebd_cookies.json`，之后自动复用，不用每次都登录）。
-- **风险**：如果这一步发生在无人值守的凌晨2点计划任务里，脚本会一直卡在等待终端输入，直到任务超时（`setup_monthly_task.ps1` 里设置的执行时限是3小时，超时后任务会被强制结束，本次抓取视为失败）。
-- **建议**：每月计划任务跑完后，检查一次运行状态（第4节）；一旦发现失败或抓取数量异常，登录服务器手动跑一次 `python src/main.py --step 1`（这次会用可见浏览器），确认能正常自动登录（说明 Cookie 仍有效）或需要重新手动登录一次刷新 Cookie。
+### 3.1 美丽修行 BEBD（bebd.bevol.com）— ⚠️ 需要人工定期刷新登录
+
+**凌晨计划任务的处理机制（已解决卡死问题）**：
+- 计划任务使用 `--unattended` 标志运行，Cookie 失效时**自动跳过 BEBD 抓取并记录警告日志**，不再阻塞等待。
+- 跳过后日志会出现：`⚠️ BEBD 跳过（无人值守模式）: Cookie 已失效`
+
+**如何刷新登录（工作时间操作，每月一次）**：
+```powershell
+.\scripts\refresh_bebd_login.ps1
+```
+脚本会打开有头浏览器 → 管理员完成登录 → 按 Enter 保存 Cookie → 当晚/当月凌晨任务自动复用。
+
+**建议操作节奏**：
+- **每月月底最后一个工作日下班前**执行一次登录刷新（Cookie 通常可维持数周）
+- 看到每日日志中出现 `BEBD: ❌` 时立即执行刷新
+
+**手动检查 Cookie 是否仍有效**：
+```powershell
+python src\module6_daily_fill.py --check
+```
 
 ### 3.2 NMPA 政府网站（nmpa.gov.cn/datasearch、hzpba.nmpa.gov.cn）— 全自动，无需登录
 - 用于查询"特殊化妆品注册"和"普通化妆品备案"的详情/PDF链接，全程自动化，不需要人工登录。
@@ -74,9 +162,11 @@
 
 ## 6. 每月人工检查清单
 
-- [ ] 计划任务当月是否按时运行（`taskschd.msc` 查看"上次运行时间/结果"，或看板管理面板里的状态）
-- [ ] 抓取数量是否明显异常（0条 或 暴增）
-- [ ] BEBD 登录 Cookie 是否仍然有效（看日志有没有卡在登录提示）
+- [ ] 月度任务（`CI_NewSKU_Monthly_Scrape`）当月是否按时运行，日志末尾无 ERROR
+- [ ] 每日补全任务（`CI_NewSKU_Daily_Fill`）是否每天正常触发（看 `log/daily_fill_*.log`）
+- [ ] BEBD 登录 Cookie 状态：看每日日志里的 `BEBD: ✅/❌` 标记；若连续出现 ❌，需手动重登
+- [ ] NMPA hzpba 连通性：看每日日志里的 `NMPA: ✅/❌`；❌ 属已知 WAF 限制，不影响本地图片渲染
+- [ ] 待补全产品数量趋势：运行 `python src\module6_daily_fill.py --dry-run` 查看"剩余未完整产品"数
 - [ ] SharePoint 上传 / 邮件发送这两步日志末尾是否显示成功
 - [ ] （若近期没做过）确认 Azure AD Client Secret 是否已经按第3.3节建议重置
 

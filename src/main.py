@@ -119,7 +119,7 @@ def load_checkpoint() -> int:
 # 运行单个步骤
 # ─────────────────────────────────────────────
 
-def run_step(step_num: int):
+def run_step(step_num: int, unattended: bool = False):
     desc, module_name = STEPS[step_num]
     log.info(f"\n{'='*60}")
     log.info(f"▶ 步骤 {step_num}/{len(STEPS)}: {desc}")
@@ -127,7 +127,16 @@ def run_step(step_num: int):
 
     try:
         module = importlib.import_module(module_name)
-        module.run()
+        # 步骤1（BEBD）支持 unattended 参数
+        if step_num == 1 and hasattr(module, "run"):
+            import inspect
+            sig = inspect.signature(module.run)
+            if "unattended" in sig.parameters:
+                module.run(unattended=unattended)
+            else:
+                module.run()
+        else:
+            module.run()
         save_checkpoint(step_num, "completed")
         log.info(f"✅ 步骤 {step_num} 完成\n")
     except Exception:
@@ -150,6 +159,8 @@ def main():
                         help="从步骤 N 开始运行")
     parser.add_argument("--resume",    action="store_true",
                         help="从上次中断的步骤继续")
+    parser.add_argument("--unattended", action="store_true",
+                        help="无人值守模式：BEBD Cookie 失效时跳过而不阻塞等待")
     args = parser.parse_args()
     # 确保 config 拿到最终值（argparse 可能覆盖了预解析值）
     os.environ["CI_DAYS"] = str(args.days)
@@ -189,7 +200,7 @@ def main():
 
         for n in range(start, len(STEPS) + 1):
             try:
-                run_step(n)
+                run_step(n, unattended=args.unattended)
             except Exception:
                 log.error(f"流程在步骤 {n} 中止")
                 log.error(f"修复问题后运行 --from-step {n} 或 --resume 可重新继续")

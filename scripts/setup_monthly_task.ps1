@@ -19,7 +19,7 @@
 param(
     [ValidateRange(1,28)][int]$Day = 1,
     [string]$Time = "02:00",
-    [int]$Days = 31,
+    [int]$Days = 40,
     [string]$TaskName = "CI_NewSKU_Monthly_Scrape"
 )
 

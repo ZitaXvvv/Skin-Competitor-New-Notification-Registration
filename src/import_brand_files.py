@@ -14,15 +14,18 @@ MAIN = DOCS / "CI_List_Ada.xlsx"
 
 # 品牌文件 → Excel sheet 名称映射
 BRAND_MAP = {
-    "百雀羚":  "BQL",
-    "谷雨":    "GUYU",
-    "韩束":    "Kans",
-    "兰蔻":    "Lancome",
-    "妮维雅":  "Nivea",
-    "欧诗漫":  "OSM",
-    "修丽可":  "SKIN CEUTICALS",
-    "自然堂":  "Chando",
-    "资生堂":  "Shiseido",
+    "百雀羚":   "BQL",
+    "谷雨":     "GUYU",
+    "韩束":     "Kans",
+    "兰蔻":     "Lancome",
+    "欧诗漫":   "OSM",
+    "修丽可":   "SKIN CEUTICALS",
+    "自然堂":   "Chando",
+    "雅诗兰黛": "ESTEE LAUDER",
+    "珀莱雅":   "PROYA",
+    "娇韵诗":   "Clains",
+    "薇诺娜":   "Winona",
+    "科颜氏":   "Kiehls",
 }
 
 HEADERS = [
@@ -35,9 +38,14 @@ REG_PAT = re.compile(
     r"(妆网备字|国妆备字|国妆特字|国妆特进字|国妆备进字|卫妆特字|网备进字|国妆网备进字)"
 )
 
+# 与 dashboard.py 保持一致：导入时同步排除男士/唇部/契尔氏/名女人产品
+EXCLUDE_PAT = re.compile(r"唇|口红|男士|男仕|契尔氏|名女人")
+
 
 def clean_reg(s: str) -> str:
-    return re.sub(r"\s+", "", str(s or "")).strip()
+    # 统一全角括号 → 半角，再去除空白，确保去重一致
+    t = str(s or "").replace("（", "(").replace("）", ")")
+    return re.sub(r"\s+", "", t).strip()
 
 
 def main():
@@ -100,6 +108,8 @@ def main():
 
             reg = clean_reg(reg_raw)
             if not reg or not REG_PAT.search(reg):
+                continue
+            if EXCLUDE_PAT.search(name):          # 排除男士/唇部产品
                 continue
             if reg in existing:
                 continue

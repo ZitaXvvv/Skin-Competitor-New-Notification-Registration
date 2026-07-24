@@ -94,10 +94,19 @@ def is_logged_in(page: Page) -> bool:
         return False
 
 
-def ensure_login(page: Page, context: BrowserContext):
-    """如果未登录，等待用户手动完成登录"""
+def ensure_login(page: Page, context: BrowserContext, interactive: bool = True):
+    """
+    如果未登录：
+    - interactive=True（默认，白天手动运行）：等待用户在浏览器里完成登录
+    - interactive=False（无人值守计划任务）：抛出 RuntimeError，由调用方跳过
+    """
     if is_logged_in(page):
         return
+    if not interactive:
+        raise RuntimeError(
+            "BEBD Cookie 已失效且当前为无人值守模式。"
+            "请在工作时段运行 scripts\\refresh_bebd_login.ps1 刷新登录状态。"
+        )
     print("\n" + "=" * 60)
     print("【需要手动操作】：")
     print("  浏览器已打开 https://bebd.bevol.com/")
@@ -545,6 +554,10 @@ def _extract_rows(page: Page, brand_en: str, cutoff: date, today: date) -> list[
             if not name:
                 log.debug(f"    跳过(产品名为空)")
                 continue
+            # 搜索科颜氏时混入契尔氏、搜兰蔻时混入名女人，均为串台结果直接跳过
+            if "契尔氏" in name or "名女人" in name:
+                log.debug(f"    跳过(非目标品牌串台: {name!r})")
+                continue
 
             results.append({
                 "date":        prod_date.strftime("%m/%d/%Y"),
@@ -969,18 +982,19 @@ def _navigate_to_search_page(page: Page):
 # 主入口
 # ─────────────────────────────────────────────
 
-def run(headless_override: Optional[bool] = None):
+def run(headless_override: Optional[bool] = None, unattended: bool = False):
     """
     运行模块1。
 
     headless_override=None → 有 Cookie 文件则 headless，否则显示浏览器等待登录
     headless_override=True → 强制 headless（需已有有效 Cookie）
     headless_override=False → 强制显示浏览器
+    unattended=True → 无人值守模式（计划任务）：Cookie 失效时跳过 BEBD 而不阻塞等待
     """
     has_cookies = COOKIES_FILE.exists()
-    # 默认可见模式，方便手动处理验证码
-    headless = headless_override if headless_override is not None else False
-    log.info(f"启动 Playwright (headless={headless})")
+    # 默认可见模式，方便手动处理验证码；无人值守时强制 headless
+    headless = headless_override if headless_override is not None else (True if unattended else False)
+    log.info(f"启动 Playwright (headless={headless}, unattended={unattended})")
 
     all_products: dict = {brand: [] for brand in BRANDS}
 
@@ -1008,7 +1022,7 @@ def run(headless_override: Optional[bool] = None):
             load_cookies(context)
             bebd_page.goto(BEBD_URL, timeout=30000)
             bebd_page.wait_for_timeout(2000)
-            ensure_login(bebd_page, context)
+            ensure_login(bebd_page, context, interactive=not unattended)
 
             # 主页搜索框是 <div>，不是 <input>，需先点左侧"搜索"菜单进入搜索页
             log.info("导航到搜索页…")
@@ -1069,6 +1083,10 @@ def run(headless_override: Optional[bool] = None):
             bebd_page.close()
             browser.close()
 
+    except RuntimeError as _login_err:
+        # 无人值守模式下 Cookie 失效时的优雅退出（不阻塞计划任务）
+        log.warning(f"⚠️  BEBD 跳过（无人值守模式）: {_login_err}")
+        log.warning("   请在工作时段运行 scripts\\refresh_bebd_login.ps1 刷新登录。")
     except Exception as _run_exc:
         log.error(f"运行中断: {_run_exc}", exc_info=True)
     finally:
